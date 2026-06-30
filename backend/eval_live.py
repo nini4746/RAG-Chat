@@ -14,13 +14,18 @@ def run(q, quality=False):
     if A._INJECT.search(q):
         return {"q": q, "blocked": "prompt-injection", "tokens": 0}
 
-    queries = A.rewrite_query(q) if A.should_rewrite(q) else [q]
+    do_rewrite = A.should_rewrite(q)
+    if do_rewrite:
+        queries, rw = A.rewrite_query(q)
+    else:
+        queries, rw = [q], {"input": 0, "output": 0}
+    k_final = A.K_FINAL if do_rewrite else A.K_SIMPLE
     hits = A.retrieve(queries, k=A.RERANK_POOL)
-    hits = A.rerank(queries, hits, A.K_FINAL)
+    hits = A.rerank(queries, hits, k_final)
 
     # out-of-corpus guard
     if not hits or max(h["score"] for h in hits) < A.OOS_FLOOR:
-        return {"q": q, "blocked": "out-of-corpus", "tokens": 0,
+        return {"q": q, "blocked": "out-of-corpus", "tokens": rw["input"] + rw["output"],
                 "best_score": (max((h["score"] for h in hits), default=0))}
 
     context = "\n\n".join(f"[{i + 1}] {h['text']}" for i, h in enumerate(hits))
@@ -35,11 +40,13 @@ def run(q, quality=False):
     return {
         "q": q,
         "queries": queries,
+        "k": len(hits),
         "sections": [h.get("section") for h in hits],
         "cited": [(c["n"], c.get("section"), c["source"]) for c in citations],
         "unverified_sections": unverified,
-        "tokens_in": resp.usage.input_tokens,
-        "tokens_out": resp.usage.output_tokens,
+        "tokens_in": resp.usage.input_tokens + rw["input"],
+        "tokens_out": resp.usage.output_tokens + rw["output"],
+        "tokens_rewrite": rw["input"] + rw["output"],
         "answer": answer,
     }
 
@@ -67,10 +74,10 @@ def main():
                   "| best_score:", r.get("best_score"))
             continue
         print("  queries:", r["queries"])
-        print("  retrieved sections:", r["sections"])
+        print(f"  k(chunks)={r['k']}  retrieved sections:", r["sections"])
         print("  cited:", r["cited"])
         print("  unverified_sections:", r["unverified_sections"])
-        print(f"  tokens IN={r['tokens_in']} OUT={r['tokens_out']}")
+        print(f"  tokens IN={r['tokens_in']} OUT={r['tokens_out']} (rewrite={r['tokens_rewrite']})")
         print("  answer[:400]:", r["answer"][:400].replace("\n", " "))
 
 
