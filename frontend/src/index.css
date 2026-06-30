@@ -123,6 +123,9 @@ body {
 .ref-sec { font-family: var(--sans); font-size: 0.74rem; color: var(--muted); margin-left: 0.3rem; }
 .diag-blocked { font-family: var(--sans); font-size: 0.82rem; color: var(--blue); margin: 0.7rem 0; font-weight: 600; }
 .diag-warn { font-family: var(--sans); font-size: 0.82rem; color: #c08a2e; margin: 0.7rem 0; line-height: 1.5; }
+.alert { font-family: var(--sans); font-size: 0.82rem; margin: 0.55rem 0; padding: 0.5rem 0.7rem; border-radius: 6px; line-height: 1.5; border: 1px solid; }
+.alert.blocked { color: var(--blue); border-color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, transparent); font-weight: 600; }
+.alert.warn { color: #b9791f; border-color: #d8a445; background: color-mix(in srgb, #d8a445 12%, transparent); }
 
 /* ── live steps ──────────────────────────────────────── */
 .steps { display: flex; flex-direction: column; gap: 0.32rem; margin-bottom: 0.55rem; font-family: var(--mono); }

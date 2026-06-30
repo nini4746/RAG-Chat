@@ -22,9 +22,11 @@ const T = {
     dPassages: 'passages', dUsed: 'used', dChars: 'chars', dTokens: 'tokens',
     dExplain: (k, r, c) => `Searched every indexed passage, kept the ${k} most relevant (${r}); the answer used ${c} of them. Tokens = text processed — fewer is cheaper and faster.`,
     gChunks: 'Passages (used / found)', gCtxSize: 'Context size', gCtxSent: 'Context sent',
-    gAns: 'Answer written', gTotal: 'Total tokens', gLang: 'Answer language',
+    gAns: 'Answer written', gRewrite: 'Query rewrite', gTotal: 'Total tokens', gLang: 'Answer language',
     tRel: 'Relevance', tDoc: 'Document', tSize: 'Size', tUsed: 'Used', tPrev: 'Preview',
     open: 'open source', loading: 'Loading…', toolsUsed: 'Tools used',
+    dBlocked: (r) => `🛡 Blocked (${r}) · 0 generation tokens`,
+    dUnverified: (s) => `⚠ Cited sections not found in retrieved context: ${s}`,
     tut: [
       ['14 CFR Retrieval Terminal', 'Answers questions about the U.S. Federal Aviation Regulations (Title 14 CFR) from the indexed regulation text only — and shows its work.'],
       ['Transmit a query', 'Type a question and press Enter. Try “What are the VFR fuel-reserve requirements, day versus night?”'],
@@ -49,9 +51,11 @@ const T = {
     dPassages: '구절', dUsed: '사용', dChars: '문자', dTokens: '토큰',
     dExplain: (k, r, c) => `색인된 모든 구절을 검색해 가장 관련 높은 ${k}개를 골랐고(${r}), 답변엔 그중 ${c}개를 사용했습니다. 토큰 = 처리된 텍스트량 — 적을수록 싸고 빠름.`,
     gChunks: '구절 (사용 / 검색)', gCtxSize: '컨텍스트 크기', gCtxSent: '보낸 컨텍스트',
-    gAns: '작성된 답변', gTotal: '총 토큰', gLang: '답변 언어',
+    gAns: '작성된 답변', gRewrite: '질의 재작성', gTotal: '총 토큰', gLang: '답변 언어',
     tRel: '관련도', tDoc: '문서', tSize: '크기', tUsed: '사용', tPrev: '미리보기',
     open: '원문 열기', loading: '불러오는 중…', toolsUsed: '사용한 도구',
+    dBlocked: (r) => `🛡 차단됨 (${r}) · 생성 0 토큰`,
+    dUnverified: (s) => `⚠ 검색 근거에 없는 인용 섹션: ${s}`,
     tut: [
       ['14 CFR 검색 터미널', '색인된 규정 본문만으로 미 연방 항공 규정(14 CFR)에 답하고, 그 과정을 보여줍니다.'],
       ['질문 전송', '질문을 입력하고 Enter. 예: “VFR 연료 예비량 요건은 주간과 야간에 어떻게 다른가?”'],
@@ -76,9 +80,11 @@ const T = {
     dPassages: '箇所', dUsed: '使用', dChars: '文字', dTokens: 'トークン',
     dExplain: (k, r, c) => `全インデックスを検索し関連度の高い${k}件を採用（${r}）、回答にそのうち${c}件を使用。トークン=処理した文章量、少ないほど安く速い。`,
     gChunks: '箇所（使用 / 取得）', gCtxSize: 'コンテキスト量', gCtxSent: '送信コンテキスト',
-    gAns: '回答の生成', gTotal: '合計トークン', gLang: '回答言語',
+    gAns: '回答の生成', gRewrite: 'クエリ再構成', gTotal: '合計トークン', gLang: '回答言語',
     tRel: '関連度', tDoc: '文書', tSize: 'サイズ', tUsed: '使用', tPrev: 'プレビュー',
     open: '出典を開く', loading: '読み込み中…', toolsUsed: '使用ツール',
+    dBlocked: (r) => `🛡 ブロック (${r}) · 生成0トークン`,
+    dUnverified: (s) => `⚠ 取得した文脈にない引用セクション: ${s}`,
     tut: [
       ['14 CFR 検索ターミナル', 'インデックス済みの規則本文のみで米国連邦航空規則（14 CFR）に回答し、その過程を表示します。'],
       ['質問を送信', '質問を入力してEnter。例「VFRの燃料予備量は昼と夜でどう違う？」'],
@@ -103,9 +109,11 @@ const T = {
     dPassages: 'pasajes', dUsed: 'usados', dChars: 'caract.', dTokens: 'tokens',
     dExplain: (k, r, c) => `Se buscó en todos los pasajes indexados y se conservaron los ${k} más relevantes (${r}); la respuesta usó ${c}. Tokens = texto procesado — menos es más barato y rápido.`,
     gChunks: 'Pasajes (usados / hallados)', gCtxSize: 'Tamaño de contexto', gCtxSent: 'Contexto enviado',
-    gAns: 'Respuesta escrita', gTotal: 'Tokens totales', gLang: 'Idioma de respuesta',
+    gAns: 'Respuesta escrita', gRewrite: 'Reescritura', gTotal: 'Tokens totales', gLang: 'Idioma de respuesta',
     tRel: 'Relevancia', tDoc: 'Documento', tSize: 'Tamaño', tUsed: 'Usado', tPrev: 'Vista',
     open: 'abrir fuente', loading: 'Cargando…', toolsUsed: 'Herramientas usadas',
+    dBlocked: (r) => `🛡 Bloqueado (${r}) · 0 tokens de generación`,
+    dUnverified: (s) => `⚠ Secciones citadas no halladas en el contexto: ${s}`,
     tut: [
       ['Terminal de Búsqueda 14 CFR', 'Responde sobre el Reglamento Federal de Aviación de EE. UU. (Título 14 CFR) solo con el texto indexado, y muestra su trabajo.'],
       ['Envía una consulta', 'Escribe y pulsa Enter. Prueba «¿Reservas de combustible VFR de día frente a noche?»'],
@@ -173,6 +181,12 @@ export default function App() {
           history: messages.slice(-4).map((m) => ({ role: m.role, text: m.text })),
         }),
       })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}))
+        const msg = detail.error || `request failed (${res.status})`
+        setMessages((m) => [...m, { role: 'assistant', text: `⚠️ ${msg}`, ts: Date.now() }])
+        return
+      }
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = '', citations = [], diagnostics = null, answer = '', steps = []
@@ -213,6 +227,10 @@ export default function App() {
   async function fetchDoc(source) {
     if (docCache.current.has(source)) return docCache.current.get(source)
     const res = await fetch(`/api/doc/${encodeURIComponent(source)}`)
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}))
+      throw new Error(detail.error || `couldn't open source (${res.status})`)
+    }
     const data = await res.json()
     const text = data.text || data.error || 'not found'
     docCache.current.set(source, text)
@@ -314,6 +332,11 @@ function Message({ m, t, onOpenDoc }) {
           ? <div className="text md"><ReactMarkdown>{stripSection(m.text)}</ReactMarkdown></div>
           : <div className="text">{m.text}</div>}
 
+        {m.diagnostics?.blocked && <div className="alert blocked">{t.dBlocked(m.diagnostics.blocked)}</div>}
+        {m.diagnostics?.unverified_sections?.length > 0 && (
+          <div className="alert warn">{t.dUnverified(m.diagnostics.unverified_sections.map((s) => `§${s}`).join(', '))}</div>
+        )}
+
         {m.citations?.length > 0 && (
           <div className="sources">
             {m.citations.map((c) => {
@@ -386,10 +409,6 @@ function Diagnostics({ d, latencyMs, t, onOpenDoc }) {
         {latencyMs != null && <span className="pill"><b>{(latencyMs / 1000).toFixed(1)}</b>s</span>}
       </summary>
 
-      {d.blocked && <p className="diag-blocked">🛡 {d.blocked} · 0 generation tokens</p>}
-      {d.unverified_sections?.length > 0 && (
-        <p className="diag-warn">⚠ Cited sections not found in retrieved context: {d.unverified_sections.map((s) => `§${s}`).join(', ')}</p>
-      )}
       {d.retrieval && <p className="diag-explain">{t.dExplain(d.k, d.retrieval, d.cited_count)}</p>}
 
       <div className="diag-tokens">
@@ -397,6 +416,7 @@ function Diagnostics({ d, latencyMs, t, onOpenDoc }) {
         <div><span className="k">{t.gCtxSize}</span><span className="v">{d.context_chars?.toLocaleString()}</span></div>
         <div><span className="k">{t.gCtxSent}</span><span className="v">{tk.input?.toLocaleString()}</span></div>
         <div><span className="k">{t.gAns}</span><span className="v">{tk.output?.toLocaleString()}</span></div>
+        {tk.rewrite > 0 && <div><span className="k">{t.gRewrite}</span><span className="v">{tk.rewrite?.toLocaleString()}</span></div>}
         <div><span className="k">{t.gTotal}</span><span className="v">{tk.total?.toLocaleString()}</span></div>
         <div><span className="k">{t.gLang}</span><span className="v">{d.language}</span></div>
       </div>
