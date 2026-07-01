@@ -109,6 +109,11 @@ body {
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 0.8rem 0; }
 .md code { font-family: var(--mono); background: #0b1220; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.88em; }
 .md a { color: var(--blue); }
+/* GFM tables (remark-gfm) — the model emits comparison tables for compare questions */
+.md table { border-collapse: collapse; margin: 0.7rem 0; width: 100%; font-size: 0.9em; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+.md th { background: color-mix(in srgb, var(--blue) 12%, transparent); color: var(--ink-hi); font-weight: 700; }
+.md tr:nth-child(even) td { background: color-mix(in srgb, var(--line) 30%, transparent); }
 
 /* ── source references ───────────────────────────────── */
 .sources { margin-top: 0.65rem; display: flex; flex-wrap: wrap; gap: 0.4rem; }

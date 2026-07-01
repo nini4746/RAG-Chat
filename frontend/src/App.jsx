@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const LANGUAGES = ['Auto', 'English', '한국어', '日本語', 'Español']
 const LANG_CODE = { Auto: 'en', English: 'en', '한국어': 'ko', '日本語': 'ja', 'Español': 'es' }
@@ -331,7 +332,7 @@ function Message({ m, t, onOpenDoc }) {
     <div className={`row row-${m.role}`}>
       <div className="bubble">
         {m.role === 'assistant'
-          ? <div className="text md"><ReactMarkdown>{stripSection(m.text)}</ReactMarkdown></div>
+          ? <div className="text md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{stripSection(m.text)}</ReactMarkdown></div>
           : <div className="text">{m.text}</div>}
 
         {m.diagnostics?.cache_hit && <div className="alert cache">{t.dCacheHit}</div>}
@@ -387,7 +388,7 @@ function LiveMessage({ live, t }) {
           ))}
         </div>
         {live.text
-          ? <div className="text md"><ReactMarkdown>{stripSection(live.text)}</ReactMarkdown><span className="caret">▍</span></div>
+          ? <div className="text md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{stripSection(live.text)}</ReactMarkdown><span className="caret">▍</span></div>
           : <span className="dots"><i/><i/><i/></span>}
       </div>
     </div>
