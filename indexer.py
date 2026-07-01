@@ -8,6 +8,7 @@ you can focus on the structure.
 """
 import pickle
 import re
+import threading
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -84,13 +85,18 @@ def chunk_text(text: str, target_chars: int = 500, overlap_chars: int = 60) -> l
 # ════════════════════════════════════════════════════════════════
 
 _model: SentenceTransformer | None = None
+_model_lock = threading.Lock()
 
 
 def get_model() -> SentenceTransformer:
+    # Double-checked locking so the embedder loads exactly once even under the
+    # threaded dev server (two concurrent first calls would otherwise both load it).
     global _model
     if _model is None:
-        print(f"Loading embedding model ({MODEL_NAME})... (one-time download ~80MB)")
-        _model = SentenceTransformer(MODEL_NAME)
+        with _model_lock:
+            if _model is None:
+                print(f"Loading embedding model ({MODEL_NAME})... (one-time download ~80MB)")
+                _model = SentenceTransformer(MODEL_NAME)
     return _model
 
 

@@ -11,6 +11,9 @@ import gzip
 import json
 import re
 import sys
+import threading
+from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
 
 # Make the parent directory importable so we can use indexer.py
@@ -45,28 +48,60 @@ RERANK_POOL = 16    # over-fetch this many, then cross-encoder rerank down to K_
 SEC_PER_KEY = 2     # max chunks kept per § section in the over-fetch pool
 
 _reranker: CrossEncoder | None = None
+_reranker_lock = threading.Lock()
 
 
 def get_reranker() -> CrossEncoder:
+    # Double-checked locking: the CrossEncoder is a shared singleton, but the Flask
+    # dev server is threaded — two concurrent first requests could otherwise each
+    # load the ~90 MB model. The lock makes init happen exactly once.
     global _reranker
     if _reranker is None:
-        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        with _reranker_lock:
+            if _reranker is None:
+                _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     return _reranker
+
+
+# Cross-encoder rerank is the heaviest per-request CPU cost. Cache each
+# (query, chunk_id) score — the index is static, so a repeated query re-scores
+# nothing. Bounded LRU so long sessions don't grow unbounded.
+_RERANK_CACHE: "OrderedDict[tuple, float]" = OrderedDict()
+_RERANK_CAP = 20000
+
+
+def _rerank_cache_get(key):
+    if key in _RERANK_CACHE:
+        _RERANK_CACHE.move_to_end(key)
+        return _RERANK_CACHE[key]
+    return None
+
+
+def _rerank_cache_put(key, val):
+    _RERANK_CACHE[key] = val
+    _RERANK_CACHE.move_to_end(key)
+    if len(_RERANK_CACHE) > _RERANK_CAP:
+        _RERANK_CACHE.popitem(last=False)
 
 
 def rerank(queries, hits, k):
     """Cross-encoder rerank: score each candidate against the (English) query with
     a model that reads query+passage jointly — far sharper than bi-encoder cosine —
-    then keep the top k. Local, no token cost. Queries are already English."""
+    then keep the top k. Local, no token cost. Cached per (query, chunk_id)."""
     if not hits:
         return hits
     q = " ".join(queries) if isinstance(queries, list) else queries
-    scores = get_reranker().predict([(q, h["text"]) for h in hits])
-    order = sorted(range(len(hits)), key=lambda i: float(scores[i]), reverse=True)
+    # Score only the cache misses (still batched for throughput), fill the cache.
+    misses = [h for h in hits if _rerank_cache_get((q, h["chunk_id"])) is None]
+    if misses:
+        scores = get_reranker().predict([(q, h["text"]) for h in misses])
+        for h, s in zip(misses, scores):
+            _rerank_cache_put((q, h["chunk_id"]), float(s))
+    ordered = sorted(hits, key=lambda h: _rerank_cache_get((q, h["chunk_id"])), reverse=True)
     out = []
-    for rank, i in enumerate(order[:k]):
-        h = dict(hits[i])
-        h["rerank"] = round(float(scores[i]), 3)
+    for h in ordered[:k]:
+        h = dict(h)
+        h["rerank"] = round(_rerank_cache_get((q, h["chunk_id"])), 3)
         out.append(h)
     return out
 
@@ -164,6 +199,34 @@ def rewrite_query(question: str, history=None) -> tuple[list[str], dict]:
         return [question], {"input": 0, "output": 0}
 
 
+# Rewrite cache: single-turn rewrites are pure over a static corpus, so a repeat
+# skips the rewrite API call entirely. A hit spends 0 tokens and is REPORTED as 0,
+# so the token panel stays honest. Follow-ups (history) are context-dependent → not cached.
+_REWRITE_CACHE: "OrderedDict[str, list]" = OrderedDict()
+_REWRITE_CAP = 1024
+
+
+def rewrite_cached(question, history):
+    if history:
+        return rewrite_query(question, history)
+    if question in _REWRITE_CACHE:
+        _REWRITE_CACHE.move_to_end(question)
+        return _REWRITE_CACHE[question], {"input": 0, "output": 0}
+    queries, usage = rewrite_query(question, None)
+    _REWRITE_CACHE[question] = queries
+    _REWRITE_CACHE.move_to_end(question)
+    if len(_REWRITE_CACHE) > _REWRITE_CAP:
+        _REWRITE_CACHE.popitem(last=False)
+    return queries, usage
+
+
+# Answer cache: full (question, language, model) → answer + citations + diagnostics.
+# A hit skips rewrite AND generation entirely — the whole request costs 0 tokens.
+# The index is static within a run, so this is safe; a rebuild starts a fresh process.
+_ANSWER_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_ANSWER_CAP = 512
+
+
 def _seckey(i):
     """Section identity for dedup: (source, §) for legal chunks; unique per chunk
     when there's no section (plain-text corpora)."""
@@ -171,43 +234,65 @@ def _seckey(i):
     return (r["source"], r["section"]) if r.get("section") else ("_idx", i)
 
 
+@lru_cache(maxsize=4096)
+def _embed_one(text: str) -> tuple:
+    """Per-query embedding cache — repeated/demo queries skip the MiniLM encode."""
+    return tuple(embed([text])[0])
+
+
+# Retrieval is deterministic over a static index, so (queries, k) -> selection is
+# cacheable end-to-end (embed + BM25 + RRF + §-dedup all skipped on a repeat).
+_RETRIEVE_CACHE: "OrderedDict[tuple, tuple]" = OrderedDict()
+_RETRIEVE_CAP = 2048
+
+
 def retrieve(queries, k: int = K_FINAL) -> list[dict]:
     """Hybrid retrieval: fuse dense (MiniLM cosine) and lexical (BM25) rankings
     with Reciprocal Rank Fusion, then keep up to SEC_PER_KEY chunks per § section
     and take the top k. Dense catches paraphrase/meaning; BM25 catches exact section
-    numbers and defined legal terms the embedder blurs. Cross-encoder rerank (the
-    caller) does the final ordering, so this just needs a good, diverse pool.
+    numbers and defined legal terms the embedder blurs. Cached per (queries, k).
     """
     if isinstance(queries, str):
         queries = [queries]
-    qvs = np.asarray(embed(queries), dtype="float32")     # (Q, 384)
-    best = (_EMB @ qvs.T).max(axis=1)                      # best cosine to any query
-    bm25 = _BM25.get_scores(" ".join(queries).lower().split())
+    ckey = (tuple(queries), k)
+    cached = _RETRIEVE_CACHE.get(ckey)
+    if cached is not None:
+        _RETRIEVE_CACHE.move_to_end(ckey)
+        selected, scores = cached
+    else:
+        qvs = np.asarray([_embed_one(q) for q in queries], dtype="float32")  # (Q, 384)
+        best = (_EMB @ qvs.T).max(axis=1)                     # best cosine to any query
+        bm25 = _BM25.get_scores(" ".join(queries).lower().split())
 
-    # Reciprocal Rank Fusion (constant 60 is the standard RRF damping).
-    rrf = np.zeros(len(INDEX), dtype="float32")
-    top = min(200, len(INDEX))
-    for rank, i in enumerate(np.argsort(-best)[:top]):
-        rrf[i] += 1.0 / (60 + rank)
-    for rank, i in enumerate(np.argsort(-bm25)[:top]):
-        rrf[i] += 1.0 / (60 + rank)
+        # Reciprocal Rank Fusion (constant 60 is the standard RRF damping).
+        rrf = np.zeros(len(INDEX), dtype="float32")
+        top = min(200, len(INDEX))
+        for rank, i in enumerate(np.argsort(-best)[:top]):
+            rrf[i] += 1.0 / (60 + rank)
+        for rank, i in enumerate(np.argsort(-bm25)[:top]):
+            rrf[i] += 1.0 / (60 + rank)
 
-    # Keep up to SEC_PER_KEY chunks per § section: long sections (e.g. § 61.109
-    # flight-time tables) split into several chunks, so the answer's paragraph may
-    # not be the section's single best-ranked chunk. The cross-encoder rerank (the
-    # caller) trims this pool back down to K_FINAL by quality.
-    sec_count, selected = {}, []
-    for i in np.argsort(-rrf):
-        key = _seckey(int(i))
-        if sec_count.get(key, 0) >= SEC_PER_KEY:
-            continue
-        sec_count[key] = sec_count.get(key, 0) + 1
-        selected.append(int(i))
-        if len(selected) >= k:
-            break
+        # Keep up to SEC_PER_KEY chunks per § section: long sections (e.g. § 61.109
+        # flight-time tables) split into several chunks, so the answer's paragraph may
+        # not be the section's single best-ranked chunk. The cross-encoder rerank (the
+        # caller) trims this pool back down to K_FINAL by quality.
+        sec_count, selected = {}, []
+        for i in np.argsort(-rrf):
+            key = _seckey(int(i))
+            if sec_count.get(key, 0) >= SEC_PER_KEY:
+                continue
+            sec_count[key] = sec_count.get(key, 0) + 1
+            selected.append(int(i))
+            if len(selected) >= k:
+                break
+        scores = [round(float(best[i]), 4) for i in selected]
+        _RETRIEVE_CACHE[ckey] = (selected, scores)
+        _RETRIEVE_CACHE.move_to_end(ckey)
+        if len(_RETRIEVE_CACHE) > _RETRIEVE_CAP:
+            _RETRIEVE_CACHE.popitem(last=False)
 
     hits = []
-    for i in selected:
+    for i, sc in zip(selected, scores):
         r = INDEX[i]
         hits.append({
             "chunk_id": r["chunk_id"],
@@ -216,7 +301,7 @@ def retrieve(queries, k: int = K_FINAL) -> list[dict]:
             "section": r.get("section"),
             "title": r.get("title"),
             "text": r["text"],
-            "score": round(float(best[i]), 4),
+            "score": sc,
         })
     return hits
 
@@ -398,13 +483,32 @@ def chat_stream():
             yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("prompt-injection")})
             return
 
+        # Answer cache: an identical question (same language + model) skips rewrite AND
+        # generation — the whole request costs 0 tokens. Only for fresh (no-history)
+        # turns; a follow-up depends on conversation state. Killer demo for the
+        # token-reduction thesis: re-ask → ⚡ cached · 0 tokens.
+        akey = (user_message, language, gen_model)
+        if not history and akey in _ANSWER_CACHE:
+            _ANSWER_CACHE.move_to_end(akey)
+            hit = _ANSWER_CACHE[akey]
+            yield _sse({"type": "tool", "name": "cache", "status": "done",
+                        "label": "Answer cache hit — 0 tokens"})
+            ans = hit["answer"]
+            for i in range(0, len(ans), 60):          # chunked so the UI still streams
+                yield _sse({"type": "delta", "text": ans[i:i + 60]})
+            hitdiag = dict(hit["diag"])
+            hitdiag["cache_hit"] = True
+            hitdiag["tokens"] = {"input": 0, "output": 0, "total": 0, "rewrite": 0, "generation": 0}
+            yield _sse({"type": "done", "citations": hit["citations"], "diagnostics": hitdiag})
+            return
+
         # Rewrite on multi-entity questions, non-English, OR any follow-up (history
         # present) so pronouns/ellipsis resolve into a self-contained query.
         do_rewrite = bool(history) or should_rewrite(user_message)
         rw_usage = {"input": 0, "output": 0}
         if do_rewrite:
             yield _sse({"type": "tool", "name": "rewrite", "label": "Planning the search"})
-            queries, rw_usage = rewrite_query(user_message, history)
+            queries, rw_usage = rewrite_cached(user_message, history)
             yield _sse({"type": "tool", "name": "rewrite", "status": "done",
                         "label": f"Search plan: {len(queries)} queries",
                         "sources": queries})
@@ -470,7 +574,10 @@ def chat_stream():
             with client.messages.stream(
                 model=gen_model,
                 max_tokens=1200,
-                system=SYSTEM_PROMPT,
+                # Mark the (constant) system prompt for Anthropic prompt caching so a
+                # repeated prefix is billed at the cached rate when eligible.
+                system=[{"type": "text", "text": SYSTEM_PROMPT,
+                         "cache_control": {"type": "ephemeral"}}],
                 messages=messages,
             ) as stream:
                 for text in stream.text_stream:
@@ -492,6 +599,12 @@ def chat_stream():
         answer = "".join(answer_parts)
         citations, diag = _diagnostics(hits, answer, final.usage, language,
                                        model=gen_model, rewrite_usage=rw_usage)
+        # Store for the answer cache so an identical re-ask is free (no-history only).
+        if not history and answer and not answer.startswith("⚠️"):
+            _ANSWER_CACHE[akey] = {"answer": answer, "citations": citations, "diag": diag}
+            _ANSWER_CACHE.move_to_end(akey)
+            if len(_ANSWER_CACHE) > _ANSWER_CAP:
+                _ANSWER_CACHE.popitem(last=False)
         yield _sse({"type": "done", "citations": citations, "diagnostics": diag})
 
     return Response(gen(), mimetype="text/event-stream",
