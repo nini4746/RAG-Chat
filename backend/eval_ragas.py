@@ -33,7 +33,12 @@ def _llm(system, user, max_tokens=500):
 def _json(system, user, max_tokens=500):
     t = _llm(system, user, max_tokens)
     lo, hi = t.find("["), t.rfind("]")
-    return json.loads(t[lo:hi + 1]) if lo != -1 else []
+    if lo == -1 or hi <= lo:
+        return []
+    try:
+        return json.loads(t[lo:hi + 1])
+    except Exception:
+        return []
 
 
 def _cos(a, b):
@@ -118,6 +123,8 @@ def run(q, gt=None):
     queries, _ = A.rewrite_cached(q, None) if do_rewrite else ([q], None)
     k_final = A.K_FINAL if do_rewrite else A.K_SIMPLE
     hits = A.rerank(queries, A.retrieve(queries, k=A.RERANK_POOL), k_final)
+    # Mirror production recall boosters (definition-section + §-sibling expansion).
+    hits = A.expand_sections(queries, A.definition_boost(q, queries, hits))
     context = "\n\n".join(f"[{i + 1}] {h['text']}" for i, h in enumerate(hits))
     uc = f"CONTEXT:\n{context}\n\nQUESTION:\n{q}"
     gen_model = A.MODEL_HQ if A.is_hard(q) else A.MODEL   # mirror production escalation
