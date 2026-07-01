@@ -484,12 +484,19 @@ function Diagnostics({ d, latencyMs, t, onOpenDoc }) {
 function findHighlight(text, preview) {
   const raw = (preview || '').replace(/…$/, '').trim()
   if (!raw) return null
-  for (const n of [140, 90, 50]) {
-    const frag = raw.slice(0, n).trim()
-    if (frag.length < 12) break
-    const pat = frag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
-    const m = text.match(new RegExp(pat))
-    if (m) return [m.index, m.index + m[0].length]
+  // Chunks prepend a synthetic "§ NN.NNN <title>." heading line that is NOT repeated
+  // in the doc before each sub-paragraph, so a preview like "§ 61.109 …\n(2) Except…"
+  // has no verbatim match. Also try matching from after that heading line.
+  const candidates = [raw]
+  if (raw.startsWith('§') && raw.includes('\n')) candidates.push(raw.slice(raw.indexOf('\n') + 1).trim())
+  for (const cand of candidates) {
+    for (const n of [140, 90, 50]) {
+      const frag = cand.slice(0, n).trim()
+      if (frag.length < 12) break
+      const pat = frag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
+      const m = text.match(new RegExp(pat))
+      if (m) return [m.index, m.index + m[0].length]
+    }
   }
   return null
 }
