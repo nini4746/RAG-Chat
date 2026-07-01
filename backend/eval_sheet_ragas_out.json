@@ -1,0 +1,102 @@
+[
+  {
+    "q": "What aeronautical experience is required for a private pilot certificate with an airplane single-engine rating?",
+    "faith": 1.0,
+    "relev": 0.756524577116067,
+    "prec": 0.876923076923077,
+    "recall": 0.5,
+    "corr": 0.85,
+    "sup": 22,
+    "claims": 22
+  },
+  {
+    "q": "For private-pilot airplane aeronautical experience, what makes flight time count as “cross-country time”?",
+    "faith": 1.0,
+    "relev": 0.6680704052016848,
+    "prec": 1.0,
+    "recall": 1.0,
+    "corr": 0.7,
+    "sup": 6,
+    "claims": 6
+  },
+  {
+    "q": "What recent flight experience must a pilot have to carry passengers, and what changes at night?",
+    "faith": 0.9333333333333333,
+    "relev": 0.7189365509835115,
+    "prec": 0.10989010989010989,
+    "recall": 1.0,
+    "corr": 0.3,
+    "sup": 14,
+    "claims": 15
+  },
+  {
+    "q": "What does a flight review require, and how often must a pilot complete one to act as PIC?",
+    "faith": 1.0,
+    "relev": 0.5829959746098246,
+    "prec": 0.3333333333333333,
+    "recall": 1.0,
+    "corr": 0.7,
+    "sup": 12,
+    "claims": 12
+  },
+  {
+    "q": "Which conditions can prevent an applicant from meeting first-class airman medical standards?",
+    "faith": 1.0,
+    "relev": 0.7948244260219384,
+    "prec": 1.0,
+    "recall": 0.75,
+    "corr": 0.4,
+    "sup": 0,
+    "claims": 0
+  },
+  {
+    "q": "What are the fuel-reserve requirements for VFR flight by day versus night, and how do rotorcraft differ?",
+    "faith": 1.0,
+    "relev": 0.8806154850216483,
+    "prec": 0.07692307692307693,
+    "recall": 1.0,
+    "corr": 1.0,
+    "sup": 8,
+    "claims": 8
+  },
+  {
+    "q": "Under IFR, when is an alternate airport required, and what fuel must be carried?",
+    "faith": 1.0,
+    "relev": 0.658974230818475,
+    "prec": 0.2708082766906296,
+    "recall": 1.0,
+    "corr": 0.85,
+    "sup": 0,
+    "claims": 0
+  },
+  {
+    "q": "If an IFR flight plan needs an alternate, what weather minima must be forecast at the alternate?",
+    "faith": 1.0,
+    "relev": 0.6138464650705071,
+    "prec": 0.09386724386724386,
+    "recall": 1.0,
+    "corr": 0.95,
+    "sup": 7,
+    "claims": 7
+  },
+  {
+    "q": "How do operating requirements differ between Class B and Class C airspace?",
+    "faith": 0.95,
+    "relev": 0.8405462748485565,
+    "prec": 0.4660205463611036,
+    "recall": 1.0,
+    "corr": 0.9,
+    "sup": 19,
+    "claims": 20
+  },
+  {
+    "q": "What must a pilot do before operating in an active restricted area, and how is that different from a prohibited area?",
+    "faith": 1.0,
+    "relev": 0.7404881714224937,
+    "prec": 0.14758986928104575,
+    "recall": 1.0,
+    "corr": 1.0,
+    "sup": 8,
+    "claims": 8
+  }
+]

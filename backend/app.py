@@ -11,7 +11,6 @@ import gzip
 import json
 import re
 import sys
-import threading
 from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -49,22 +48,21 @@ K_SIMPLE = 5        # fewer chunks for simple single-fact lookups (keeps tokens 
 RERANK_POOL = 24    # over-fetch this many, then cross-encoder rerank down to K_FINAL
 SEC_PER_KEY = 2     # max chunks kept per § section in the over-fetch pool
 LEX_KEEP = 3        # top BM25 (exact-term) hits guaranteed past the rerank cut
-SEC_EXPAND = 6      # sibling chunks of a hit's § pulled in for completeness (recall)
+SEC_EXPAND = 6      # max sibling chunks pulled per hit's § (recall)
 EXPAND_CAP = 26     # global cap on chunks after sibling/definition expansion
+EXPAND_FLOOR = 0.28 # a sibling is only pulled if this query-relevant (cosine or strong
+#                     BM25) — trims clearly-unrelated paragraphs, keeps the on-topic ones
 
 _reranker: CrossEncoder | None = None
-_reranker_lock = threading.Lock()
 
 
 def get_reranker() -> CrossEncoder:
-    # Double-checked locking: the CrossEncoder is a shared singleton, but the Flask
-    # dev server is threaded — two concurrent first requests could otherwise each
-    # load the ~90 MB model. The lock makes init happen exactly once.
+    # The CrossEncoder (~90 MB) loads exactly once and lives in _hot so it also
+    # survives app.py hot-reloads under dev.py. _hot.cache is itself locked, so two
+    # concurrent first requests won't double-load it.
     global _reranker
     if _reranker is None:
-        with _reranker_lock:
-            if _reranker is None:
-                _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        _reranker = _hot.cache("_reranker", lambda: CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2"))
     return _reranker
 
 
@@ -122,46 +120,62 @@ def rerank(queries, hits, k):
             kept.add(h["chunk_id"])
     return out
 
+# All heavy startup work goes through _hot.cache so it's built ONCE and survives
+# app.py hot-reloads under dev.py (see _hot.py). A normal `python app.py` run builds
+# each exactly once too — identical behavior, just reload-safe.
+import _hot
+
 # Load the index once at startup. Fails fast if no index — run `python indexer.py` first.
-INDEX = load_index()
+INDEX = _hot.cache("INDEX", load_index)
 # Precompute the unit-normalized embedding matrix for fast similarity math.
-_EMB = np.asarray([r["embedding"] for r in INDEX], dtype="float32")  # (N, 384)
+_EMB = _hot.cache("_EMB", lambda: np.asarray([r["embedding"] for r in INDEX], dtype="float32"))  # (N, 384)
 print(f"Loaded {len(INDEX)} chunks from disk")
 # BM25 lexical index — complements the embedder on exact legal terms / section
 # numbers (MiniLM can't tell "§ 91.151" from "§ 91.155"; BM25 can).
-_BM25 = BM25Okapi([r["text"].lower().split() for r in INDEX])
+_BM25 = _hot.cache("_BM25", lambda: BM25Okapi([r["text"].lower().split() for r in INDEX]))
+
 
 # (source, §) -> its chunk indices in reading order. Lets a single hit pull in the
 # rest of its section (recall booster for multi-paragraph / enumeration answers).
-_SECTION_CHUNKS: "dict[tuple, list]" = defaultdict(list)
-for _i, _r in enumerate(INDEX):
-    if _r.get("section"):
-        _SECTION_CHUNKS[(_r["source"], _r["section"])].append(_i)
-for _k in _SECTION_CHUNKS:
-    _SECTION_CHUNKS[_k].sort(key=lambda j: INDEX[j]["chunk_index"])
+def _build_section_chunks():
+    d: "dict[tuple, list]" = defaultdict(list)
+    for i, r in enumerate(INDEX):
+        if r.get("section"):
+            d[(r["source"], r["section"])].append(i)
+    for k in d:
+        d[k].sort(key=lambda j: INDEX[j]["chunk_index"])
+    return d
+
+
+_SECTION_CHUNKS = _hot.cache("_SECTION_CHUNKS", _build_section_chunks)
 # Definition-section chunks (e.g. § 1.1 / § 61.1 "…definitions") — for definitional
 # questions the answer lives here, but the huge glossary ranks low, so we boost it.
-_DEF_IDX = [_i for _i, _r in enumerate(INDEX)
-            if "definitions" in (_r.get("title") or "").lower()]
+_DEF_IDX = _hot.cache("_DEF_IDX", lambda: [i for i, r in enumerate(INDEX)
+                                           if "definitions" in (r.get("title") or "").lower()])
 _DEF_EMB = _EMB[_DEF_IDX] if _DEF_IDX else None
 # BM25 over just the definition chunks — exact-term matching pins "Cross-country time
 # means …" that dense cosine blurs inside a glossary chunk.
-_DEF_BM25 = BM25Okapi([INDEX[_i]["text"].lower().split() for _i in _DEF_IDX]) if _DEF_IDX else None
+_DEF_BM25 = _hot.cache("_DEF_BM25", lambda: (
+    BM25Okapi([INDEX[i]["text"].lower().split() for i in _DEF_IDX]) if _DEF_IDX else None))
 print(f"Indexed {len(_SECTION_CHUNKS)} sections, {len(_DEF_IDX)} definition chunks")
 
-_DOC_CACHE: dict[str, str] = {}   # source filename -> cleaned full text (lazy)
+
+# Pre-extract every source PDF once (in parallel) so opening a citation is instant
+# from the first click (vol1 alone takes ~7s to extract — do it now, not mid-demo).
+# PDF parsing releases the GIL enough to overlap, so cold boot isn't serial on vol1.
+def _extract_pdfs():
+    cache: dict[str, str] = {}
+    pdfs = sorted(DOCS_DIR.glob("*.pdf"))
+    if pdfs:
+        with ThreadPoolExecutor(max_workers=min(4, len(pdfs))) as ex:
+            for name, text in ex.map(lambda p: (p.name, clean_pages(extract_pages(p))), pdfs):
+                cache[name] = text
+    return cache
+
+
+_DOC_CACHE = _hot.cache("_DOC_CACHE", _extract_pdfs)   # source filename -> cleaned full text
 # Warm the embedder + reranker at startup so the first user query isn't slow.
-embed(["warmup"])
-get_reranker().predict([("warmup", "warmup")])
-# Pre-extract every source PDF once so opening a citation is instant from the
-# first click (vol1 alone takes ~7s to extract — do it now, not mid-demo).
-# Pre-extract every source PDF in parallel so cold boot isn't dominated by the
-# sequential ~7s vol1 extraction (PDF parsing releases the GIL enough to overlap).
-_pdfs = sorted(DOCS_DIR.glob("*.pdf"))
-if _pdfs:
-    with ThreadPoolExecutor(max_workers=min(4, len(_pdfs))) as _ex:
-        for _name, _text in _ex.map(lambda p: (p.name, clean_pages(extract_pages(p))), _pdfs):
-            _DOC_CACHE[_name] = _text
+_hot.cache("_warmup", lambda: (embed(["warmup"]), get_reranker().predict([("warmup", "warmup")])))
 print(f"Pre-cached {len(_DOC_CACHE)} source documents")
 
 
@@ -627,6 +641,10 @@ def expand_sections(queries, hits):
         for j in np.argsort(-blend)[:SEC_EXPAND]:
             if len(out) >= EXPAND_CAP:
                 break
+            # Relevance gate: skip siblings that aren't actually about the query, so a
+            # simple question doesn't drag in a whole section's unrelated paragraphs.
+            if float(cos[int(j)]) < EXPAND_FLOOR and bm_all[sibs[int(j)]] / bm_norm < 0.5:
+                continue
             idx = sibs[int(j)]
             seen.add(INDEX[idx]["chunk_id"])
             out.append(_mk_hit(idx, float(cos[int(j)]), expanded=True))
@@ -720,8 +738,10 @@ def chat_stream():
                 yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("out-of-corpus", rw_usage)})
                 return
 
-            # Recall boosters: definition-section chunk for definitional questions, then
-            # expand each hit's § with relevant siblings so multi-paragraph answers stay whole.
+            # Recall boosters: definition chunk for definitional Qs, then §-sibling
+            # expansion. Expansion is relevance-gated (only siblings actually similar to
+            # the query), so simple single-fact Qs stay lean while multi-paragraph Qs
+            # pull the paragraphs they need — accuracy up without token bloat.
             n_core = len(hits)
             hits = expand_sections(queries, definition_boost(user_message, queries, hits))
             if len(hits) > n_core:

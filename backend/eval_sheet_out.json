@@ -1,0 +1,267 @@
+[
+  {
+    "q": "What aeronautical experience is required for a private pilot certificate with an airplane single-engine rating?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "61.109",
+      "61.129",
+      "61.109",
+      "61.129",
+      "61.107",
+      "61.160",
+      "61.313",
+      "61.52"
+    ],
+    "cited": [
+      [
+        "61.107",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ],
+      [
+        "61.109",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# Aeronautical Experience for Private Pilot Certificate with Airplane Single-Engine Rating\n\nFor a private pilot certificate with an airplane category and single-engine class rating, the requirements are:\n\n**Standard Requirements:** [1]\n- At least 40 hours of total flight time, which must include:\n  - At least 20 hours of flight training from an authorized instructor\n  - At least 10 hours of solo flight training in the areas of operation specified in section 61.107(b)(1)\n  - At least 3 hours of cross-country flight training in a single-engine airplane\n\n**Reduced Requirements for Part 142 Training:** [3]\nAn applicant who has satisfactorily completed an approved private pilot course conducted by a training center certificated under part 142 of the Code of Federal Regulations may need only 35 hours of total aeronautical experience to meet the requirements, except when fewer hours are approved by the Administrator.\n\nThe training must cover the designated areas of operation, which include preflight preparation, preflight procedures, airport operations, takeoffs and landings, performance maneuvers, ground reference maneuvers, navigation, and slow flight and stalls. [5]"
+  },
+  {
+    "q": "For private-pilot airplane aeronautical experience, what makes flight time count as “cross-country time”?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "61.65",
+      "61.160",
+      "61.109",
+      "61.411",
+      "61.159",
+      "61.159",
+      "61.129",
+      "61.411"
+    ],
+    "cited": [
+      [
+        "61.109",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ],
+      [
+        "61.411",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "The provided CONTEXT passages do not contain the definition or criteria that establish what makes flight time count as \"cross-country time\" for private-pilot airplane aeronautical experience.\n\nThe passages cite various cross-country flight time requirements for different certificates and ratings (such as 3 hours for a multiengine private pilot certificate [3], or 25 hours for light-sport aircraft privileges [4][8]), but they do not define the qualifying characteristics of cross-country flight itself—such as minimum distance, number of landings, or other defining features.\n\nTo answer your question completely, I would need to consult the regulatory definition of \"cross-country flight\" or \"cross-country flight time,\" which is not included in the provided context."
+  },
+  {
+    "q": "What recent flight experience must a pilot have to carry passengers, and what changes at night?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "61.195",
+      "61.57",
+      "61.57",
+      "61.197",
+      "5.9",
+      "61.197",
+      "61.159",
+      "91.313"
+    ],
+    "cited": [
+      [
+        "61.57",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "The context provided does not contain substantive information about the specific recent flight experience requirements a pilot must have to carry passengers, nor does it detail what changes at night for passenger operations.\n\nWhile the passages reference section 61.57 (Recent flight experience: Pilot in command) [2][3], the excerpts provided are incomplete and focus on narrow scenarios (such as alternatives for pilots with 1,500+ hours operating multi-crew aircraft). The context also does not include the main body of section 61.57 that would specify the baseline recent flight experience requirements for passenger carrying operations or night-specific modifications.\n\nTo answer your question accurately, I would need access to the complete text of section 61.57 and related sections defining passenger-carrying currency requirements."
+  },
+  {
+    "q": "What does a flight review require, and how often must a pilot complete one to act as PIC?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "61.56",
+      "91.1713",
+      "91.1055",
+      "91.1055",
+      "91.1069",
+      "61.58",
+      "91.1031",
+      "61.56",
+      "91.1715"
+    ],
+    "cited": [
+      [
+        "61.56",
+        "CFR-2025-title14-vol2-part61.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "## Flight Review Requirements\n\nA flight review consists of a minimum of **1 hour of flight training and 1 hour of ground training** [1]. The review must include:\n\n1. A review of the current general operating and flight rules of part 91 [1]\n2. A review of maneuvers and procedures necessary for the pilot to demonstrate safe exercise of their certificate privileges, at the discretion of the instructor [1]\n\nThe review must be accomplished in an aircraft for which the pilot is rated and conducted by an authorized instructor, with logbook endorsement certifying satisfactory completion [8].\n\n## Frequency Requirement\n\nThe context provided does not explicitly state how often a pilot must complete a flight review to act as pilot in command (PIC). While section 61.56 references \"the period specified in paragraph (c)\" regarding when a flight review is required [8], the actual recency interval is not included in the passages provided. To answer this question fully, you would need to consult section 61.56(c) of the Federal Aviation Regulations, which is not included in this context."
+  },
+  {
+    "q": "Which conditions can prevent an applicant from meeting first-class airman medical standards?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "67.113",
+      "67.109",
+      "67.101",
+      "67.111",
+      "67.103",
+      "67.213",
+      "67.313",
+      "67.201"
+    ],
+    "cited": [
+      [
+        "67.103",
+        "CFR-2025-title14-vol2-part67.pdf"
+      ],
+      [
+        "67.109",
+        "CFR-2025-title14-vol2-part67.pdf"
+      ],
+      [
+        "67.111",
+        "CFR-2025-title14-vol2-part67.pdf"
+      ],
+      [
+        "67.113",
+        "CFR-2025-title14-vol2-part67.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "Based on the provided context, the following conditions can prevent an applicant from meeting first-class airman medical standards:\n\n**Neurologic Conditions** [2]:\n- Epilepsy\n- A disturbance of consciousness without satisfactory medical explanation of the cause\n- A transient loss of control of nervous system function(s) without satisfactory medical explanation of the cause\n\n**Cardiovascular Conditions** [4]:\n- Myocardial infarction\n- Angina pectoris\n- Coronary heart disease that has required treatment or, if untreated, that has been symptomatic or clinically significant\n- Cardiac valve replacement\n- Permanent cardiac pacemaker implantation\n- Heart replacement\n\n**Metabolic Conditions** [1]:\n- Diabetes mellitus that requires insulin or any other hypoglycemic drug for control\n\n**General Medical Conditions** [1]:\n- Any other organic, functional, or structural disease, defect, or limitation that the Federal Air Surgeon finds makes the person unable to safely perform the duties or exercise the privileges of the airman certificate applied for or held\n\n**Vision Standards** [5]:\n- Inability to achieve distant visual acuity of 20/20 or better in each eye separately, with or without corrective lenses (though corrective lenses may be worn to meet this standard)"
+  },
+  {
+    "q": "What are the fuel-reserve requirements for VFR flight by day versus night, and how do rotorcraft differ?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "91.151",
+      "89.545",
+      "91.507",
+      "91.205",
+      "91.205",
+      "29.1351",
+      "91.515",
+      "29.953",
+      "25.343"
+    ],
+    "cited": [
+      [
+        "91.151",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# Fuel-Reserve Requirements for VFR Flight\n\n## Airplanes\n\nFor airplanes operating under VFR conditions, section 91.151(a) establishes different reserve requirements based on time of day [1]:\n\n- **Day operations**: A pilot must have enough fuel to reach the first intended landing point plus an additional 30 minutes of fuel at normal cruising speed [1]\n- **Night operations**: A pilot must have enough fuel to reach the first intended landing point plus an additional 45 minutes of fuel at normal cruising speed [1]\n\n## Rotorcraft\n\nRotorcraft have a more stringent requirement. Under section 91.151(b), pilots must have enough fuel to reach the first intended landing point plus an additional **20 minutes** of fuel at normal cruising speed [1]. Notably, this 20-minute reserve applies regardless of whether the flight is conducted during day or night operations—there is no distinction between day and night for rotorcraft [1].\n\n## Summary\n\nThe key difference is that **airplanes require longer reserves** (30 minutes day, 45 minutes night) compared to **rotorcraft's uniform 20-minute reserve**, and **only airplanes have a night/day distinction**, with night requiring an additional 15 minutes beyond the day requirement."
+  },
+  {
+    "q": "Under IFR, when is an alternate airport required, and what fuel must be carried?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "91.167",
+      "91.1039",
+      "91.1039",
+      "91.169",
+      "91.167",
+      "89.545",
+      "91.169",
+      "91.175"
+    ],
+    "cited": [
+      [
+        "91.1039",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ],
+      [
+        "91.167",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ],
+      [
+        "91.169",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# Alternate Airport Requirement and Fuel Requirements Under IFR\n\n## When an Alternate Airport is Required\n\nAn alternate airport is required in an IFR flight plan **except** in two specific situations [7]:\n\n1. When Part 97 prescribes a standard instrument approach procedure to the first airport of intended landing, **OR**\n2. When a special instrument approach procedure has been issued by the Administrator for the first airport of intended landing [7]\n\nAdditionally, when taking off under IFR from an airport where weather is at or above takeoff minimums but **below** authorized IFR landing minimums, an alternate airport within one hour's flying time must be available [3].\n\n## Fuel Requirements\n\nA pilot operating under IFR must carry fuel to:\n\n1. **Complete the flight to the first airport of intended landing** [1]\n2. **Fly from that airport to the alternate airport** (unless the alternate airport exception applies) [1]\n3. **Fly for an additional reserve period:**\n   - **45 minutes** at normal cruising speed for aircraft [1]\n   - **30 minutes** at normal cruising speed for helicopters [1]\n\nThe fuel calculation must account for weather reports, forecasts, and actual weather conditions [1].\n\n## Alternate Airport Weather Minimums\n\nThe alternate airport must have weather—at the estimated time of arrival—at or above minimum ceiling and visibility standards, which generally require at least 2,000 feet ceiling above airport elevation and 3 statute miles visibility for most aircraft [5]."
+  },
+  {
+    "q": "If an IFR flight plan needs an alternate, what weather minima must be forecast at the alternate?",
+    "rewrite": false,
+    "retrieved_sections": [
+      "91.169",
+      "91.169",
+      "91.1039",
+      "91.167",
+      "27.1589",
+      "91.527",
+      "89.545"
+    ],
+    "cited": [
+      [
+        "91.169",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# IFR Alternate Airport Weather Minima\n\nIf an IFR flight plan includes an alternate airport, the forecast weather at the estimated time of arrival must meet specific minima depending on the type of instrument approach procedure available [1].\n\n## Standard Minima by Approach Type\n\n**For airports with published instrument approach procedures** [2]:\n\n- **Precision approach procedure**: Ceiling 600 feet and visibility 2 statute miles\n- **Nonprecision approach procedure**: Ceiling 800 feet and visibility 2 statute miles\n\nThese minima apply when the airport has an instrument approach procedure published in Part 97 or a special procedure issued by the Administrator. If an alternate-specific minimum is specified in the procedure itself, that specified minimum applies instead [2].\n\nThe pilot must have appropriate weather reports or forecasts (or both) indicating these conditions will exist at the alternate airport at the estimated time of arrival [1]."
+  },
+  {
+    "q": "How do operating requirements differ between Class B and Class C airspace?",
+    "rewrite": true,
+    "retrieved_sections": [
+      "91.130",
+      "91.131",
+      "91.130",
+      "71.41",
+      "91.131",
+      "91.135",
+      "71.51",
+      "61.95",
+      "71.9"
+    ],
+    "cited": [
+      [
+        "71.9",
+        "CFR-2025-title14-vol2-part71.pdf"
+      ],
+      [
+        "91.130",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ],
+      [
+        "91.131",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# Operating Requirements: Class B vs. Class C Airspace\n\n## ATC Clearance\n\n**Class B:** An operator must receive an ATC clearance from the ATC facility having jurisdiction before operating an aircraft in that area [2].\n\n**Class C:** No explicit clearance requirement is stated in the provided passages. Instead, operators must establish two-way radio communications with the ATC facility providing air traffic services prior to entering the airspace [1].\n\n## Radio Communications\n\n**Class B:** Operators must have an operable two-way radio capable of communications with ATC on appropriate frequencies for that Class B airspace area [5].\n\n**Class C:** Operators must establish two-way radio communications with the ATC facility prior to entering the airspace and maintain those communications while within it [1].\n\n## Altitude Requirements\n\n**Class B:** Large turbine engine-powered airplanes operating to or from a primary airport must operate at or above the designated floors of the Class B airspace area while within its lateral limits, unless otherwise authorized by ATC [2].\n\n**Class C:** No altitude floor requirement is specified in the provided passages.\n\n## Equipment Requirements\n\nBoth Class B and Class C require similar equipment: operating transponder and automatic altitude reporting equipment per section 91.215, and after January 1, 2020, equipment per section 91.225 [3][5].\n\n## Restrictiveness\n\nClass B airspace is more restrictive than Class C airspace [9], meaning Class B generally imposes stricter operating requirements overall."
+  },
+  {
+    "q": "What must a pilot do before operating in an active restricted area, and how is that different from a prohibited area?",
+    "rewrite": false,
+    "retrieved_sections": [
+      "91.133",
+      "73.83",
+      "73.13",
+      "73.13",
+      "91.313",
+      "61.160",
+      "5.97"
+    ],
+    "cited": [
+      [
+        "73.13",
+        "CFR-2025-title14-vol2-part73.pdf"
+      ],
+      [
+        "73.83",
+        "CFR-2025-title14-vol2-part73.pdf"
+      ],
+      [
+        "91.133",
+        "CFR-2025-title14-vol2-part91.pdf"
+      ]
+    ],
+    "unverified": [],
+    "answer": "# Operating in Restricted vs. Prohibited Areas\n\n## Restricted Areas\n\nBefore operating in an active restricted area, a pilot must obtain **advance permission** from either [3]:\n- The using agency, or\n- The controlling agency\n\nThis permission requirement applies when operating between the designated altitudes and during the time of designation within the restricted area [3].\n\nAdditionally, under section 91.133, a person may operate within a restricted area only if they comply with the restrictions imposed, unless they have permission from the using or controlling agency [1].\n\n## Prohibited Areas\n\nOperating in a prohibited area has a stricter requirement: a pilot must obtain **authorization** from the using agency before operating there [2]. Unlike restricted areas, prohibited areas appear to allow no operations at all without such prior authorization [1][2].\n\n## Key Difference\n\nThe primary distinction is that **restricted areas permit operations with advance permission** from the using or controlling agency [3], whereas **prohibited areas require authorization** and effectively prohibit all operations unless the using agency grants permission [2]. Restricted areas are designed to allow aviation operations under controlled conditions, while prohibited areas are completely off-limits except by explicit authorization."
+  }
+]
