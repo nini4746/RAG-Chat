@@ -13,6 +13,7 @@ import re
 import sys
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
@@ -119,8 +120,13 @@ embed(["warmup"])
 get_reranker().predict([("warmup", "warmup")])
 # Pre-extract every source PDF once so opening a citation is instant from the
 # first click (vol1 alone takes ~7s to extract — do it now, not mid-demo).
-for _p in sorted(DOCS_DIR.glob("*.pdf")):
-    _DOC_CACHE[_p.name] = clean_pages(extract_pages(_p))
+# Pre-extract every source PDF in parallel so cold boot isn't dominated by the
+# sequential ~7s vol1 extraction (PDF parsing releases the GIL enough to overlap).
+_pdfs = sorted(DOCS_DIR.glob("*.pdf"))
+if _pdfs:
+    with ThreadPoolExecutor(max_workers=min(4, len(_pdfs))) as _ex:
+        for _name, _text in _ex.map(lambda p: (p.name, clean_pages(extract_pages(p))), _pdfs):
+            _DOC_CACHE[_name] = _text
 print(f"Pre-cached {len(_DOC_CACHE)} source documents")
 
 
@@ -473,7 +479,9 @@ def chat_stream():
         return jsonify({"error": "message too long (max 4000 chars)"}), 413
     language = (data.get("language") or "Auto").strip()
     gen_model = MODEL_HQ if data.get("quality") else MODEL
-    history = [h for h in (data.get("history") or []) if h.get("text")][-4:]
+    # No conversation history: each query is answered standalone. Carrying prior
+    # turns would inflate every request's input tokens and force a rewrite on every
+    # follow-up — both fight the token-minimization goal. Single-shot grounding only.
 
     @stream_with_context
     def gen():
@@ -488,7 +496,7 @@ def chat_stream():
         # turns; a follow-up depends on conversation state. Killer demo for the
         # token-reduction thesis: re-ask → ⚡ cached · 0 tokens.
         akey = (user_message, language, gen_model)
-        if not history and akey in _ANSWER_CACHE:
+        if akey in _ANSWER_CACHE:
             _ANSWER_CACHE.move_to_end(akey)
             hit = _ANSWER_CACHE[akey]
             yield _sse({"type": "tool", "name": "cache", "status": "done",
@@ -502,13 +510,13 @@ def chat_stream():
             yield _sse({"type": "done", "citations": hit["citations"], "diagnostics": hitdiag})
             return
 
-        # Rewrite on multi-entity questions, non-English, OR any follow-up (history
-        # present) so pronouns/ellipsis resolve into a self-contained query.
-        do_rewrite = bool(history) or should_rewrite(user_message)
+        # Rewrite on multi-entity / enumeration / non-English questions so they
+        # resolve into self-contained English search queries.
+        do_rewrite = should_rewrite(user_message)
         rw_usage = {"input": 0, "output": 0}
         if do_rewrite:
             yield _sse({"type": "tool", "name": "rewrite", "label": "Planning the search"})
-            queries, rw_usage = rewrite_cached(user_message, history)
+            queries, rw_usage = rewrite_cached(user_message, None)
             yield _sse({"type": "tool", "name": "rewrite", "status": "done",
                         "label": f"Search plan: {len(queries)} queries",
                         "sources": queries})
@@ -559,15 +567,9 @@ def chat_stream():
 
         yield _sse({"type": "tool", "name": "generate", "label": "Writing grounded answer"})
 
-        # Recent turns for conversational coherence; CONTEXT rides only on the
-        # final user turn to avoid duplicating passages into history (token bloat).
-        messages = []
-        for h in history:
-            role = "assistant" if h.get("role") == "assistant" else "user"
-            messages.append({"role": role, "content": h["text"][:800]})
-        while messages and messages[0]["role"] == "assistant":
-            messages.pop(0)
-        messages.append({"role": "user", "content": user_content})
+        # Single-shot: only the current question + its retrieved context. No prior
+        # turns are carried, keeping the input token count minimal per request.
+        messages = [{"role": "user", "content": user_content}]
 
         answer_parts = []
         try:
@@ -599,8 +601,8 @@ def chat_stream():
         answer = "".join(answer_parts)
         citations, diag = _diagnostics(hits, answer, final.usage, language,
                                        model=gen_model, rewrite_usage=rw_usage)
-        # Store for the answer cache so an identical re-ask is free (no-history only).
-        if not history and answer and not answer.startswith("⚠️"):
+        # Store for the answer cache so an identical re-ask is free.
+        if answer and not answer.startswith("⚠️"):
             _ANSWER_CACHE[akey] = {"answer": answer, "citations": citations, "diag": diag}
             _ANSWER_CACHE.move_to_end(akey)
             if len(_ANSWER_CACHE) > _ANSWER_CAP:
@@ -641,4 +643,7 @@ def get_doc(source):
 if __name__ == "__main__":
     # No reloader: it forks a second process, and the startup doc pre-cache would
     # only warm one of them. Single process → pre-cache actually serves.
-    app.run(port=5001, debug=False, use_reloader=False)
+    # threaded=True is essential here: an SSE answer stream holds its worker for the
+    # whole response, so a single-threaded server would block every other request
+    # (e.g. opening a source doc) until the stream finishes.
+    app.run(port=5001, debug=False, use_reloader=False, threaded=True)

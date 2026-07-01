@@ -180,10 +180,8 @@ export default function App() {
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: question, language,
-          history: messages.slice(-4).map((m) => ({ role: m.role, text: m.text })),
-        }),
+        // Single-shot: no conversation history sent — keeps every request's tokens minimal.
+        body: JSON.stringify({ message: question, language }),
       })
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}))
