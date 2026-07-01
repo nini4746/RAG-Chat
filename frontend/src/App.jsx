@@ -28,7 +28,7 @@ const T = {
     open: 'open source', loading: 'Loading…', toolsUsed: 'Tools used',
     dBlocked: (r) => `🛡 Blocked (${r}) · 0 generation tokens`,
     dUnverified: (s) => `⚠ Cited sections not found in retrieved context: ${s}`,
-    dCacheHit: '⚡ Cached answer · 0 tokens spent',
+    dCacheHit: (s) => `⚡ Reused retrieved passages (${Math.round(s * 100)}% match) — search skipped, no rewrite tokens`,
     tut: [
       ['14 CFR Retrieval Terminal', 'Answers questions about the U.S. Federal Aviation Regulations (Title 14 CFR) from the indexed regulation text only — and shows its work.'],
       ['Transmit a query', 'Type a question and press Enter. Try “What are the VFR fuel-reserve requirements, day versus night?”'],
@@ -58,7 +58,7 @@ const T = {
     open: '원문 열기', loading: '불러오는 중…', toolsUsed: '사용한 도구',
     dBlocked: (r) => `🛡 차단됨 (${r}) · 생성 0 토큰`,
     dUnverified: (s) => `⚠ 검색 근거에 없는 인용 섹션: ${s}`,
-    dCacheHit: '⚡ 캐시된 답변 · 토큰 0 소비',
+    dCacheHit: (s) => `⚡ 검색 결과 재사용 (${Math.round(s * 100)}% 유사) — 검색 생략, rewrite 토큰 0`,
     tut: [
       ['14 CFR 검색 터미널', '색인된 규정 본문만으로 미 연방 항공 규정(14 CFR)에 답하고, 그 과정을 보여줍니다.'],
       ['질문 전송', '질문을 입력하고 Enter. 예: “VFR 연료 예비량 요건은 주간과 야간에 어떻게 다른가?”'],
@@ -88,7 +88,7 @@ const T = {
     open: '出典を開く', loading: '読み込み中…', toolsUsed: '使用ツール',
     dBlocked: (r) => `🛡 ブロック (${r}) · 生成0トークン`,
     dUnverified: (s) => `⚠ 取得した文脈にない引用セクション: ${s}`,
-    dCacheHit: '⚡ キャッシュ回答 · 消費トークン0',
+    dCacheHit: (s) => `⚡ 取得結果を再利用（${Math.round(s * 100)}% 一致）— 検索スキップ、rewriteトークン0`,
     tut: [
       ['14 CFR 検索ターミナル', 'インデックス済みの規則本文のみで米国連邦航空規則（14 CFR）に回答し、その過程を表示します。'],
       ['質問を送信', '質問を入力してEnter。例「VFRの燃料予備量は昼と夜でどう違う？」'],
@@ -118,7 +118,7 @@ const T = {
     open: 'abrir fuente', loading: 'Cargando…', toolsUsed: 'Herramientas usadas',
     dBlocked: (r) => `🛡 Bloqueado (${r}) · 0 tokens de generación`,
     dUnverified: (s) => `⚠ Secciones citadas no halladas en el contexto: ${s}`,
-    dCacheHit: '⚡ Respuesta en caché · 0 tokens',
+    dCacheHit: (s) => `⚡ Pasajes reutilizados (${Math.round(s * 100)}% similar) — búsqueda omitida, 0 tokens de rewrite`,
     tut: [
       ['Terminal de Búsqueda 14 CFR', 'Responde sobre el Reglamento Federal de Aviación de EE. UU. (Título 14 CFR) solo con el texto indexado, y muestra su trabajo.'],
       ['Envía una consulta', 'Escribe y pulsa Enter. Prueba «¿Reservas de combustible VFR de día frente a noche?»'],
@@ -336,7 +336,7 @@ function Message({ m, t, onOpenDoc }) {
           ? <div className="text md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{stripSection(m.text)}</ReactMarkdown></div>
           : <div className="text">{m.text}</div>}
 
-        {m.diagnostics?.cache_hit && <div className="alert cache">{t.dCacheHit}</div>}
+        {m.diagnostics?.cache_hit && <div className="alert cache">{t.dCacheHit(m.diagnostics.cache_sim ?? 1)}</div>}
         {m.diagnostics?.blocked && <div className="alert blocked">{t.dBlocked(m.diagnostics.blocked)}</div>}
         {m.diagnostics?.unverified_sections?.length > 0 && (
           <div className="alert warn">{t.dUnverified(m.diagnostics.unverified_sections.map((s) => `§${s}`).join(', '))}</div>

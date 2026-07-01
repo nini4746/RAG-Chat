@@ -12,7 +12,7 @@ import json
 import re
 import sys
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -46,9 +46,11 @@ REWRITE_MODEL = "claude-haiku-4-5"   # query rewriting
 # often span several § sections, so keep K generous + dedup by section).
 K_FINAL = 8         # max chunks for compare/list/follow-up questions (need breadth)
 K_SIMPLE = 5        # fewer chunks for simple single-fact lookups (keeps tokens lean)
-RERANK_POOL = 16    # over-fetch this many, then cross-encoder rerank down to K_FINAL
+RERANK_POOL = 24    # over-fetch this many, then cross-encoder rerank down to K_FINAL
 SEC_PER_KEY = 2     # max chunks kept per § section in the over-fetch pool
 LEX_KEEP = 3        # top BM25 (exact-term) hits guaranteed past the rerank cut
+SEC_EXPAND = 6      # sibling chunks of a hit's § pulled in for completeness (recall)
+EXPAND_CAP = 26     # global cap on chunks after sibling/definition expansion
 
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
@@ -128,6 +130,25 @@ print(f"Loaded {len(INDEX)} chunks from disk")
 # BM25 lexical index — complements the embedder on exact legal terms / section
 # numbers (MiniLM can't tell "§ 91.151" from "§ 91.155"; BM25 can).
 _BM25 = BM25Okapi([r["text"].lower().split() for r in INDEX])
+
+# (source, §) -> its chunk indices in reading order. Lets a single hit pull in the
+# rest of its section (recall booster for multi-paragraph / enumeration answers).
+_SECTION_CHUNKS: "dict[tuple, list]" = defaultdict(list)
+for _i, _r in enumerate(INDEX):
+    if _r.get("section"):
+        _SECTION_CHUNKS[(_r["source"], _r["section"])].append(_i)
+for _k in _SECTION_CHUNKS:
+    _SECTION_CHUNKS[_k].sort(key=lambda j: INDEX[j]["chunk_index"])
+# Definition-section chunks (e.g. § 1.1 / § 61.1 "…definitions") — for definitional
+# questions the answer lives here, but the huge glossary ranks low, so we boost it.
+_DEF_IDX = [_i for _i, _r in enumerate(INDEX)
+            if "definitions" in (_r.get("title") or "").lower()]
+_DEF_EMB = _EMB[_DEF_IDX] if _DEF_IDX else None
+# BM25 over just the definition chunks — exact-term matching pins "Cross-country time
+# means …" that dense cosine blurs inside a glossary chunk.
+_DEF_BM25 = BM25Okapi([INDEX[_i]["text"].lower().split() for _i in _DEF_IDX]) if _DEF_IDX else None
+print(f"Indexed {len(_SECTION_CHUNKS)} sections, {len(_DEF_IDX)} definition chunks")
+
 _DOC_CACHE: dict[str, str] = {}   # source filename -> cleaned full text (lazy)
 # Warm the embedder + reranker at startup so the first user query isn't slow.
 embed(["warmup"])
@@ -223,7 +244,8 @@ def rewrite_query(question: str, history=None) -> tuple[list[str], dict]:
     try:
         resp = client.messages.create(
             model=REWRITE_MODEL, max_tokens=200, system=system,
-            messages=[{"role": "user", "content": content}],
+            temperature=0,   # deterministic rewrite → same question yields the same
+            messages=[{"role": "user", "content": content}],  # search set every run
         )
         text = resp.content[0].text
         arr = json.loads(text[text.index("["):text.rindex("]") + 1])
@@ -258,8 +280,47 @@ def rewrite_cached(question, history):
 # Answer cache: full (question, language, model) → answer + citations + diagnostics.
 # A hit skips rewrite AND generation entirely — the whole request costs 0 tokens.
 # The index is static within a run, so this is safe; a rebuild starts a fresh process.
-_ANSWER_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
-_ANSWER_CAP = 512
+# Semantic CHUNK cache: question -> the retrieved chunk set (not the answer). A
+# similar new question reuses those chunks, skipping rewrite + hybrid retrieval +
+# rerank + expansion. We still GENERATE fresh from the chunks, so near-but-different
+# questions (day vs night, VFR vs IFR) stay correct — only the safe retrieval layer is
+# cached. Wins: no rewrite API call, and the identical context hits Anthropic's prompt
+# cache. Threshold can be moderate because a bad chunk match degrades to "not in
+# context", never a wrong-regulation answer.
+_CHUNK_CACHE: "OrderedDict[str, dict]" = OrderedDict()
+_CHUNK_CAP = 512
+CHUNK_SIM_THRESHOLD = 0.85   # moderate: reusing slightly-off chunks only weakens an
+#                              answer (generation re-grounds), never serves a wrong
+#                              regulation — so safe to be looser than an answer cache.
+#                              Clears real paraphrases (~0.88) but rejects VFR↔IFR (~0.72).
+
+
+def _chunk_cache_lookup(message):
+    """Vectorize ONLY the incoming question (one local MiniLM encode, 0 API tokens;
+    _embed_one is lru-cached). Return the most similar cached question's chunk set if
+    cosine ≥ threshold."""
+    if not _CHUNK_CACHE:
+        return None
+    qv = np.asarray(_embed_one(message), dtype="float32")
+    qn = np.linalg.norm(qv) or 1.0
+    best_c, best_k = 0.0, None
+    for k, v in _CHUNK_CACHE.items():
+        e = v["emb"]
+        c = float(qv @ e / (qn * (np.linalg.norm(e) or 1.0)))
+        if c > best_c:
+            best_c, best_k = c, k
+    if best_k is not None and best_c >= CHUNK_SIM_THRESHOLD:
+        _CHUNK_CACHE.move_to_end(best_k)
+        return _CHUNK_CACHE[best_k]["hits"], best_c
+    return None
+
+
+def _chunk_cache_put(message, hits):
+    _CHUNK_CACHE[message] = {"emb": np.asarray(_embed_one(message), dtype="float32"),
+                             "hits": hits}
+    _CHUNK_CACHE.move_to_end(message)
+    if len(_CHUNK_CACHE) > _CHUNK_CAP:
+        _CHUNK_CACHE.popitem(last=False)
 
 
 def _seckey(i):
@@ -494,6 +555,86 @@ def _blocked_diag(reason: str, rewrite_usage=None) -> dict:
     }
 
 
+_DEFN_Q = re.compile(r"\b(what is|what are|what makes|what counts as|define|definition of|meaning of|means)\b", re.I)
+
+
+def _mk_hit(idx, score, **flags):
+    r = INDEX[idx]
+    h = {"chunk_id": r["chunk_id"], "source": r["source"], "chunk_index": r["chunk_index"],
+         "section": r.get("section"), "title": r.get("title"), "text": r["text"],
+         "score": round(float(score), 4), "bm25": 0.0}
+    h.update(flags)
+    return h
+
+
+def definition_boost(question, queries, hits):
+    """For definitional questions, inject the best-matching definitions-section chunk
+    (§ 1.1 / § 61.1 "… means …"). The glossary is huge so it ranks low in normal
+    retrieval, yet it's exactly where 'what is X / what makes X' answers live. Intent
+    is judged on the ORIGINAL question (the rewrite drops phrasing like 'what makes')."""
+    if _DEF_EMB is None:
+        return hits
+    joined = (question + " " + " ".join(queries))
+    definitional = (_DEFN_Q.search(joined)
+                    or any(k in joined for k in ("정의", "무엇", "뜻", "definition", "defined")))
+    if not definitional:
+        return hits
+    # Rank definition chunks by BM25 exact-term match (nails "X means …") blended with
+    # dense cosine; add the top 2 that aren't already retrieved.
+    qtok = (question + " " + " ".join(queries)).lower().split()
+    bm = _DEF_BM25.get_scores(qtok)
+    qvs = np.asarray([_embed_one(x) for x in queries], dtype="float32")
+    cos = (_DEF_EMB @ qvs.T).max(axis=1)
+    blend = bm / (bm.max() or 1) + cos          # normalized BM25 + cosine
+    have = {h["chunk_id"] for h in hits}
+    added = []
+    for j in np.argsort(-blend):
+        idx = _DEF_IDX[int(j)]
+        if INDEX[idx]["chunk_id"] in have:
+            continue
+        added.append(_mk_hit(idx, float(cos[int(j)]), definition=True))
+        have.add(INDEX[idx]["chunk_id"])
+        if len(added) >= 2:
+            break
+    return hits + added
+
+
+def expand_sections(queries, hits):
+    """Recall booster: for each hit's § section, pull in its most query-relevant
+    sibling chunks so multi-paragraph / enumeration / definition answers aren't
+    truncated by chunk splitting. Bounded by SEC_EXPAND per section + EXPAND_CAP total."""
+    if not hits:
+        return hits
+    qvs = np.asarray([_embed_one(x) for x in queries], dtype="float32")
+    qtok = " ".join(queries).lower().split()
+    bm_all = _BM25.get_scores(qtok)                       # exact-term signal per chunk
+    bm_norm = bm_all.max() or 1.0
+    out = list(hits)
+    seen = {h["chunk_id"] for h in out}
+    for h in hits:
+        if len(out) >= EXPAND_CAP:
+            break
+        if not h.get("section"):
+            continue
+        sibs = [j for j in _SECTION_CHUNKS.get((h["source"], h["section"]), [])
+                if INDEX[j]["chunk_id"] not in seen]
+        if not sibs:
+            continue
+        cos = (_EMB[sibs] @ qvs.T).max(axis=1)
+        # Blend cosine + normalized BM25 so an exact-phrase sub-paragraph ("24 calendar
+        # months", "cross-country time means") isn't missed by dense similarity alone.
+        blend = cos + np.array([bm_all[j] for j in sibs]) / bm_norm
+        for j in np.argsort(-blend)[:SEC_EXPAND]:
+            if len(out) >= EXPAND_CAP:
+                break
+            idx = sibs[int(j)]
+            seen.add(INDEX[idx]["chunk_id"])
+            out.append(_mk_hit(idx, float(cos[int(j)]), expanded=True))
+    # Group by section in reading order so the model reads coherent, complete sections.
+    out.sort(key=lambda x: (x["source"], x.get("section") or "", x["chunk_index"]))
+    return out
+
+
 @app.route("/api/chat/stream", methods=["POST"])
 def chat_stream():
     """Server-Sent Events: emit each real pipeline step, stream the answer
@@ -524,89 +665,81 @@ def chat_stream():
             yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("prompt-injection")})
             return
 
-        # Answer cache: an identical question (same language + model) skips rewrite AND
-        # generation — the whole request costs 0 tokens. Only for fresh (no-history)
-        # turns; a follow-up depends on conversation state. Killer demo for the
-        # token-reduction thesis: re-ask → ⚡ cached · 0 tokens.
-        akey = (user_message, language, gen_model)
-        if akey in _ANSWER_CACHE:
-            _ANSWER_CACHE.move_to_end(akey)
-            hit = _ANSWER_CACHE[akey]
-            yield _sse({"type": "tool", "name": "cache", "status": "done",
-                        "label": "Answer cache hit — 0 tokens"})
-            ans = hit["answer"]
-            for i in range(0, len(ans), 60):          # chunked so the UI still streams
-                yield _sse({"type": "delta", "text": ans[i:i + 60]})
-            hitdiag = dict(hit["diag"])
-            hitdiag["cache_hit"] = True
-            hitdiag["tokens"] = {"input": 0, "output": 0, "total": 0, "rewrite": 0, "generation": 0}
-            yield _sse({"type": "done", "citations": hit["citations"], "diagnostics": hitdiag})
-            return
-
-        # Rewrite on multi-entity / enumeration / non-English questions so they
-        # resolve into self-contained English search queries.
-        do_rewrite = should_rewrite(user_message)
         rw_usage = {"input": 0, "output": 0}
-        if do_rewrite:
-            yield _sse({"type": "tool", "name": "rewrite", "label": "Planning the search"})
-            queries, rw_usage = rewrite_cached(user_message, None)
-            yield _sse({"type": "tool", "name": "rewrite", "status": "done",
-                        "label": f"Search plan: {len(queries)} queries",
-                        "sources": queries})
-            # Catch non-English injection that only surfaces once translated to English
-            # (the English-only query regex can't see it before the rewrite).
-            if _INJECT.search(" ".join(queries)):
-                yield _sse({"type": "delta", "text": _refuse("injection", language, user_message)})
-                yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("prompt-injection", rw_usage)})
-                return
+        cache_sim = None
+        reuse = _chunk_cache_lookup(user_message)
+        if reuse is not None:
+            # Semantic chunk-cache hit: reuse the prior question's retrieved passages,
+            # skipping rewrite + retrieval + rerank + expansion. Answer still generated
+            # fresh below, so a near-but-different question stays correct.
+            hits, cache_sim = reuse
+            yield _sse({"type": "tool", "name": "cache", "status": "done",
+                        "label": f"Reusing retrieved passages ({cache_sim:.0%} match) — retrieval skipped"})
         else:
-            queries = [user_message]
+            # Rewrite multi-entity / enumeration / non-English questions into
+            # self-contained English search queries.
+            do_rewrite = should_rewrite(user_message)
+            if do_rewrite:
+                yield _sse({"type": "tool", "name": "rewrite", "label": "Planning the search"})
+                queries, rw_usage = rewrite_cached(user_message, None)
+                yield _sse({"type": "tool", "name": "rewrite", "status": "done",
+                            "label": f"Search plan: {len(queries)} queries",
+                            "sources": queries})
+                # Non-English injection only surfaces once translated to English.
+                if _INJECT.search(" ".join(queries)):
+                    yield _sse({"type": "delta", "text": _refuse("injection", language, user_message)})
+                    yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("prompt-injection", rw_usage)})
+                    return
+            else:
+                queries = [user_message]
 
-        # Adaptive context size: simple single-fact lookups need fewer passages than
-        # compare/list/follow-up questions — leaner tokens (Cost) without starving the
-        # multi-section answers that genuinely need the breadth.
-        k_final = K_FINAL if do_rewrite else K_SIMPLE
+            k_final = K_FINAL if do_rewrite else K_SIMPLE
+            yield _sse({"type": "tool", "name": "search",
+                        "label": f"Searching {len(INDEX)} CFR passages"})
+            hits = retrieve(queries, k=RERANK_POOL)
+            yield _sse({"type": "tool", "name": "search", "status": "done",
+                        "label": f"Retrieved {len(hits)} candidate passages"})
 
-        yield _sse({"type": "tool", "name": "search",
-                    "label": f"Searching {len(INDEX)} CFR passages"})
+            yield _sse({"type": "tool", "name": "rerank", "label": "Re-ranking by relevance"})
+            hits = rerank(queries, hits, k_final)
+            yield _sse({"type": "tool", "name": "rerank", "status": "done",
+                        "label": f"Kept top {len(hits)} passages",
+                        "sources": sorted({h["source"] for h in hits})})
 
-        hits = retrieve(queries, k=RERANK_POOL)
-        yield _sse({"type": "tool", "name": "search", "status": "done",
-                    "label": f"Retrieved {len(hits)} candidate passages"})
+            # Content-injection defense (rubric: "resists prompt injection from
+            # retrieved content"): drop passages that themselves issue instructions.
+            clean_hits = [h for h in hits if not _INJECT.search(h["text"])]
+            if len(clean_hits) != len(hits):
+                yield _sse({"type": "tool", "name": "sanitize", "status": "done",
+                            "label": f"Sanitized {len(hits) - len(clean_hits)} passage(s) with embedded instructions"})
+                hits = clean_hits
 
-        yield _sse({"type": "tool", "name": "rerank", "label": "Re-ranking by relevance"})
-        hits = rerank(queries, hits, k_final)
-        sources = sorted({h["source"] for h in hits})
-        yield _sse({"type": "tool", "name": "rerank", "status": "done",
-                    "label": f"Kept top {len(hits)} passages",
-                    "sources": sources})
+            # Out-of-scope guard: if even the best passage barely matches, refuse.
+            if not hits or max(h["score"] for h in hits) < OOS_FLOOR:
+                yield _sse({"type": "delta", "text": _refuse("oos", language, user_message)})
+                yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("out-of-corpus", rw_usage)})
+                return
 
-        # Content-injection defense (rubric: "resists prompt injection from retrieved
-        # content"): drop any retrieved passage that itself tries to issue instructions.
-        # The CFR corpus is clean so this removes nothing in practice — it hard-guards
-        # a poisoned index instead of trusting the "treat context as data" prompt alone.
-        clean_hits = [h for h in hits if not _INJECT.search(h["text"])]
-        if len(clean_hits) != len(hits):
-            yield _sse({"type": "tool", "name": "sanitize", "status": "done",
-                        "label": f"Sanitized {len(hits) - len(clean_hits)} passage(s) with embedded instructions"})
-            hits = clean_hits
+            # Recall boosters: definition-section chunk for definitional questions, then
+            # expand each hit's § with relevant siblings so multi-paragraph answers stay whole.
+            n_core = len(hits)
+            hits = expand_sections(queries, definition_boost(user_message, queries, hits))
+            if len(hits) > n_core:
+                yield _sse({"type": "tool", "name": "expand", "status": "done",
+                            "label": f"Pulled {len(hits) - n_core} sibling/definition passages for completeness"})
+            _chunk_cache_put(user_message, hits)   # cache the retrieved set for similar future questions
 
-        # Out-of-scope guard: if even the best passage barely matches, don't
-        # hallucinate an answer. Uses the (translated) query cosine, so it works
-        # for every language.
-        if not hits or max(h["score"] for h in hits) < OOS_FLOOR:
-            yield _sse({"type": "delta", "text": _refuse("oos", language, user_message)})
-            yield _sse({"type": "done", "citations": [], "diagnostics": _blocked_diag("out-of-corpus", rw_usage)})
-            return
-
-        context = "\n\n".join(f"[{i + 1}] {h['text']}" for i, h in enumerate(hits))
-        user_content = f"CONTEXT:\n{context}\n\nQUESTION:\n{user_message}"
+        # Split into a cacheable CONTEXT block + a per-question tail. When a similar
+        # question reuses the same chunks, the CONTEXT prefix is byte-identical, so
+        # Anthropic prompt caching bills that large block at the cached rate.
+        ctx_block = "CONTEXT:\n" + "\n\n".join(f"[{i + 1}] {h['text']}" for i, h in enumerate(hits))
+        tail = f"\n\nQUESTION:\n{user_message}"
         if language and language.lower() != "auto":
-            user_content += f"\n\nWrite your entire answer in {language}, regardless of the language of the context or conversation. Keep the [n] citation markers and section numbers unchanged."
+            tail += f"\n\nWrite your entire answer in {language}, regardless of the language of the context or conversation. Keep the [n] citation markers and section numbers unchanged."
         else:
             # Auto: mirror the question's language (the English CFR corpus otherwise
             # pulls the model into English even for a non-English question).
-            user_content += "\n\nWrite your entire answer in the SAME language as the QUESTION above. Keep the [n] citation markers and section numbers unchanged."
+            tail += "\n\nWrite your entire answer in the SAME language as the QUESTION above. Keep the [n] citation markers and section numbers unchanged."
 
         # Generate, then ENFORCE faithfulness: if the answer states § numbers absent
         # from the retrieved evidence, regenerate ONCE with those numbers forbidden
@@ -614,15 +747,16 @@ def chat_stream():
         # pass costs little on average; both passes' tokens are counted honestly.
         forbidden: list[str] = []
         answer, gen_in, gen_out = "", 0, 0
+        cache_read = cache_creation = 0
         for attempt in range(2):
             yield _sse({"type": "tool", "name": "generate",
                         "label": "Writing grounded answer" if attempt == 0
                         else "Regenerating without ungrounded citations"})
-            content = user_content
+            tail_i = tail
             if attempt == 1 and forbidden:
-                content += ("\n\nDo NOT cite or state these section numbers — they are "
-                            f"NOT in the CONTEXT: {', '.join('section ' + s for s in forbidden)}. "
-                            "Use only sections shown in the CONTEXT above.")
+                tail_i += ("\n\nDo NOT cite or state these section numbers — they are "
+                           f"NOT in the CONTEXT: {', '.join('section ' + s for s in forbidden)}. "
+                           "Use only sections shown in the CONTEXT above.")
             answer_parts = []
             try:
                 with client.messages.stream(
@@ -631,7 +765,11 @@ def chat_stream():
                     # Constant system prompt marked for Anthropic prompt caching.
                     system=[{"type": "text", "text": SYSTEM_PROMPT,
                              "cache_control": {"type": "ephemeral"}}],
-                    messages=[{"role": "user", "content": content}],
+                    # CONTEXT block is cache-marked so reused-chunk requests bill it cheap.
+                    messages=[{"role": "user", "content": [
+                        {"type": "text", "text": ctx_block, "cache_control": {"type": "ephemeral"}},
+                        {"type": "text", "text": tail_i},
+                    ]}],
                 ) as stream:
                     for text in stream.text_stream:
                         answer_parts.append(text)
@@ -647,6 +785,8 @@ def chat_stream():
             answer = "".join(answer_parts)
             gen_in += final.usage.input_tokens
             gen_out += final.usage.output_tokens
+            cache_read += getattr(final.usage, "cache_read_input_tokens", 0) or 0
+            cache_creation += getattr(final.usage, "cache_creation_input_tokens", 0) or 0
             forbidden = _unverified_sections(answer, hits)
             if not forbidden or attempt == 1:
                 break
@@ -658,12 +798,11 @@ def chat_stream():
         usage = SimpleNamespace(input_tokens=gen_in, output_tokens=gen_out)
         citations, diag = _diagnostics(hits, answer, usage, language,
                                        model=gen_model, rewrite_usage=rw_usage)
-        # Store for the answer cache so an identical re-ask is free.
-        if answer and not answer.startswith("⚠️"):
-            _ANSWER_CACHE[akey] = {"answer": answer, "citations": citations, "diag": diag}
-            _ANSWER_CACHE.move_to_end(akey)
-            if len(_ANSWER_CACHE) > _ANSWER_CAP:
-                _ANSWER_CACHE.popitem(last=False)
+        diag["tokens"]["cache_read"] = cache_read          # billed ~0.1x (prompt cache)
+        diag["tokens"]["cache_creation"] = cache_creation  # billed ~1.25x (first write)
+        if cache_sim is not None:   # retrieval was reused from the chunk cache
+            diag["cache_hit"] = True
+            diag["cache_sim"] = round(cache_sim, 3)
         yield _sse({"type": "done", "citations": citations, "diagnostics": diag})
 
     return Response(gen(), mimetype="text/event-stream",
