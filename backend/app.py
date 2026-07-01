@@ -16,6 +16,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
+from types import SimpleNamespace
 
 # Make the parent directory importable so we can use indexer.py
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -183,6 +184,21 @@ def should_rewrite(question: str) -> bool:
         return True                       # non-English → translate for retrieval
     q = question.lower()
     return any(tok in q for tok in _REWRITE_TRIGGERS)
+
+
+# Compare/list/enumeration questions require multi-source synthesis where Haiku's
+# ceiling shows; auto-escalate those to Sonnet (answer quality > token cost here).
+# Plain single-fact / non-English-only lookups stay on the cheap default.
+_HARD_TRIGGERS = (
+    "compare", "versus", " vs", "difference", "between", "list", "all ", "both",
+    "each", "every", "which", "require", "experience", "condition", "disqualif",
+    "eligib", "qualif", "비교", "차이", "모든", "각각", "요건", "자격", "조건",
+)
+
+
+def is_hard(question: str) -> bool:
+    q = question.lower()
+    return any(tok in q for tok in _HARD_TRIGGERS)
 
 
 def rewrite_query(question: str, history=None) -> tuple[list[str], dict]:
@@ -493,7 +509,9 @@ def chat_stream():
     if len(user_message) > 4000:
         return jsonify({"error": "message too long (max 4000 chars)"}), 413
     language = (data.get("language") or "Auto").strip()
-    gen_model = MODEL_HQ if data.get("quality") else MODEL
+    # Auto-escalate hard (compare/list/enumeration) questions to Sonnet — they need
+    # multi-source synthesis Haiku is weaker at. Explicit quality flag forces it too.
+    gen_model = MODEL_HQ if (data.get("quality") or is_hard(user_message)) else MODEL
     # No conversation history: each query is answered standalone. Carrying prior
     # turns would inflate every request's input tokens and force a rewrite on every
     # follow-up — both fight the token-minimization goal. Single-shot grounding only.
@@ -563,6 +581,16 @@ def chat_stream():
                     "label": f"Kept top {len(hits)} passages",
                     "sources": sources})
 
+        # Content-injection defense (rubric: "resists prompt injection from retrieved
+        # content"): drop any retrieved passage that itself tries to issue instructions.
+        # The CFR corpus is clean so this removes nothing in practice — it hard-guards
+        # a poisoned index instead of trusting the "treat context as data" prompt alone.
+        clean_hits = [h for h in hits if not _INJECT.search(h["text"])]
+        if len(clean_hits) != len(hits):
+            yield _sse({"type": "tool", "name": "sanitize", "status": "done",
+                        "label": f"Sanitized {len(hits) - len(clean_hits)} passage(s) with embedded instructions"})
+            hits = clean_hits
+
         # Out-of-scope guard: if even the best passage barely matches, don't
         # hallucinate an answer. Uses the (translated) query cosine, so it works
         # for every language.
@@ -580,41 +608,55 @@ def chat_stream():
             # pulls the model into English even for a non-English question).
             user_content += "\n\nWrite your entire answer in the SAME language as the QUESTION above. Keep the [n] citation markers and section numbers unchanged."
 
-        yield _sse({"type": "tool", "name": "generate", "label": "Writing grounded answer"})
+        # Generate, then ENFORCE faithfulness: if the answer states § numbers absent
+        # from the retrieved evidence, regenerate ONCE with those numbers forbidden
+        # (not just a passive warning). Rare (RAGAS faithfulness ~0.95), so the extra
+        # pass costs little on average; both passes' tokens are counted honestly.
+        forbidden: list[str] = []
+        answer, gen_in, gen_out = "", 0, 0
+        for attempt in range(2):
+            yield _sse({"type": "tool", "name": "generate",
+                        "label": "Writing grounded answer" if attempt == 0
+                        else "Regenerating without ungrounded citations"})
+            content = user_content
+            if attempt == 1 and forbidden:
+                content += ("\n\nDo NOT cite or state these section numbers — they are "
+                            f"NOT in the CONTEXT: {', '.join('section ' + s for s in forbidden)}. "
+                            "Use only sections shown in the CONTEXT above.")
+            answer_parts = []
+            try:
+                with client.messages.stream(
+                    model=gen_model,
+                    max_tokens=1200,
+                    # Constant system prompt marked for Anthropic prompt caching.
+                    system=[{"type": "text", "text": SYSTEM_PROMPT,
+                             "cache_control": {"type": "ephemeral"}}],
+                    messages=[{"role": "user", "content": content}],
+                ) as stream:
+                    for text in stream.text_stream:
+                        answer_parts.append(text)
+                        yield _sse({"type": "delta", "text": text})
+                    final = stream.get_final_message()
+            except Exception as e:
+                body = getattr(e, "body", None)
+                msg = ((body.get("error") or {}).get("message") if isinstance(body, dict) else None) or str(e)
+                yield _sse({"type": "delta", "text": f"⚠️ {msg}"})
+                yield _sse({"type": "done", "citations": [], "diagnostics": None})
+                return
 
-        # Single-shot: only the current question + its retrieved context. No prior
-        # turns are carried, keeping the input token count minimal per request.
-        messages = [{"role": "user", "content": user_content}]
+            answer = "".join(answer_parts)
+            gen_in += final.usage.input_tokens
+            gen_out += final.usage.output_tokens
+            forbidden = _unverified_sections(answer, hits)
+            if not forbidden or attempt == 1:
+                break
+            # Ungrounded §: discard this draft in the UI and regenerate.
+            yield _sse({"type": "tool", "name": "verify", "status": "done",
+                        "label": f"Ungrounded {', '.join('§' + s for s in forbidden)} — regenerating"})
+            yield _sse({"type": "reset"})
 
-        answer_parts = []
-        try:
-            with client.messages.stream(
-                model=gen_model,
-                max_tokens=1200,
-                # Mark the (constant) system prompt for Anthropic prompt caching so a
-                # repeated prefix is billed at the cached rate when eligible.
-                system=[{"type": "text", "text": SYSTEM_PROMPT,
-                         "cache_control": {"type": "ephemeral"}}],
-                messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    answer_parts.append(text)
-                    yield _sse({"type": "delta", "text": text})
-                final = stream.get_final_message()
-        except Exception as e:
-            # Surface the real API message to the user (e.g. "Your credit balance
-            # is too low…") instead of hanging the UI with a silent spinner.
-            body = getattr(e, "body", None)
-            if isinstance(body, dict):
-                msg = (body.get("error") or {}).get("message") or str(e)
-            else:
-                msg = str(e)
-            yield _sse({"type": "delta", "text": f"⚠️ {msg}"})
-            yield _sse({"type": "done", "citations": [], "diagnostics": None})
-            return
-
-        answer = "".join(answer_parts)
-        citations, diag = _diagnostics(hits, answer, final.usage, language,
+        usage = SimpleNamespace(input_tokens=gen_in, output_tokens=gen_out)
+        citations, diag = _diagnostics(hits, answer, usage, language,
                                        model=gen_model, rewrite_usage=rw_usage)
         # Store for the answer cache so an identical re-ask is free.
         if answer and not answer.startswith("⚠️"):

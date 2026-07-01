@@ -204,6 +204,7 @@ export default function App() {
           const evt = JSON.parse(line)
           if (evt.type === 'tool') { steps = mergeStep(steps, evt); setLive((s) => ({ ...s, steps })) }
           else if (evt.type === 'delta') { answer += evt.text; setLive((s) => ({ ...s, text: answer })) }
+          else if (evt.type === 'reset') { answer = ''; setLive((s) => ({ ...s, text: '' })) }  // discard ungrounded draft, regenerating
           else if (evt.type === 'done') { citations = evt.citations || []; diagnostics = evt.diagnostics || null }
         }
       }
