@@ -126,6 +126,7 @@ body {
 .alert { font-family: var(--sans); font-size: 0.82rem; margin: 0.55rem 0; padding: 0.5rem 0.7rem; border-radius: 6px; line-height: 1.5; border: 1px solid; }
 .alert.blocked { color: var(--blue); border-color: var(--blue); background: color-mix(in srgb, var(--blue) 10%, transparent); font-weight: 600; }
 .alert.warn { color: #b9791f; border-color: #d8a445; background: color-mix(in srgb, #d8a445 12%, transparent); }
+.alert.cache { color: #1f9d57; border-color: #2fb56a; background: color-mix(in srgb, #2fb56a 12%, transparent); font-weight: 700; }
 
 /* ── live steps ──────────────────────────────────────── */
 .steps { display: flex; flex-direction: column; gap: 0.32rem; margin-bottom: 0.55rem; font-family: var(--mono); }
