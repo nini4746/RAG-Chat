@@ -19,7 +19,7 @@ from chunk_legal import chunk_legal
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 INDEX_PATH = Path(__file__).parent / "index.pkl"
 # Corpus: the 14 CFR (FAA) PDFs live one level up in documents/.
-DOCS_DIR = Path(__file__).parent.parent / "documents"
+DOCS_DIR = Path(__file__).parent / "documents"
 
 
 def extract_pdf(path: Path) -> str:
