@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 *.log
+*.err
+*.out
 .env
 .venv/
 node_modules/
