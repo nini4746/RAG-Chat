@@ -19,7 +19,7 @@ import numpy as np
 
 import app as A
 
-JUDGE = A.MODEL  # haiku — cheap judge
+JUDGE = A.MODEL_HQ  # sonnet — judge accuracy over cost (offline batch, not latency-bound)
 
 
 def _llm(system, user, max_tokens=500):
