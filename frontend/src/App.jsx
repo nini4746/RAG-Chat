@@ -138,6 +138,8 @@ function loadMessages() {
 export default function App() {
   const [messages, setMessages] = useState(loadMessages)
   const [input, setInput] = useState('')
+  const [histIdx, setHistIdx] = useState(-1)   // -1 = editing live draft, else index into sent-question history
+  const draftRef = useRef('')                  // stashes the in-progress draft while browsing history
   const [language, setLanguage] = useState('Auto')
   const [live, setLive] = useState(null)
   const [doc, setDoc] = useState(null)
@@ -174,6 +176,8 @@ export default function App() {
     if (!question || live) return
     setMessages((m) => [...m, { role: 'user', text: question, ts: Date.now() }])
     setInput('')
+    setHistIdx(-1)
+    draftRef.current = ''
     if (taRef.current) taRef.current.style.height = 'auto'
     setLive({ steps: [], text: '' })
 
@@ -221,11 +225,40 @@ export default function App() {
     } finally { setLive(null) }
   }
 
+  function recallHistory(idx, hist) {
+    // idx: index into hist (sent user questions), or -1 to restore the live draft.
+    setHistIdx(idx)
+    setInput(idx === -1 ? draftRef.current : hist[idx].text)
+    // Keep the caret at the very start so a further ArrowUp keeps walking back.
+    requestAnimationFrame(() => {
+      autoGrow()
+      const ta = taRef.current
+      if (ta) ta.selectionStart = ta.selectionEnd = 0
+    })
+  }
+
   function onKeyDown(e) {
     // Ignore Enter while an IME is mid-composition (Korean/Japanese/Chinese),
     // otherwise the still-composing last character leaks into the next message.
     if (e.nativeEvent.isComposing || e.keyCode === 229) return
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return }
+
+    // Shell-style history: ArrowUp recalls older sent questions, ArrowDown newer.
+    // Gated on caret position so it never hijacks normal cursor movement in a
+    // multi-line draft (Up only at the very start, Down only at the very end).
+    const ta = taRef.current
+    if (!ta) return
+    const hist = messages.filter((m) => m.role === 'user')
+    if (!hist.length) return
+    if (e.key === 'ArrowUp' && ta.selectionStart === 0 && ta.selectionEnd === 0) {
+      e.preventDefault()
+      if (histIdx === -1) draftRef.current = input        // stash the draft on first step back
+      recallHistory(histIdx === -1 ? hist.length - 1 : Math.max(0, histIdx - 1), hist)
+    } else if (e.key === 'ArrowDown' && histIdx !== -1 &&
+               ta.selectionStart === input.length && ta.selectionEnd === input.length) {
+      e.preventDefault()
+      recallHistory(histIdx >= hist.length - 1 ? -1 : histIdx + 1, hist)   // past newest → back to draft
+    }
   }
 
   async function fetchDoc(source) {
@@ -299,7 +332,7 @@ export default function App() {
 
       <form className="composer" onSubmit={send}>
         <textarea ref={taRef} rows={1} value={input}
-          onChange={(e) => { setInput(e.target.value); autoGrow() }}
+          onChange={(e) => { setInput(e.target.value); setHistIdx(-1); autoGrow() }}
           onKeyDown={onKeyDown} placeholder={t.placeholder} autoFocus />
         <button type="submit" disabled={!!live || !input.trim()}>↵</button>
       </form>

@@ -10,7 +10,9 @@ it too (builds each once); behavior is identical either way.
 import threading
 
 _STORE: dict = {}
-_LOCK = threading.Lock()
+# Reentrant: a factory may itself call cache() (e.g. the warmup factory calls
+# get_reranker(), which caches "_reranker") — a plain Lock would self-deadlock.
+_LOCK = threading.RLock()
 
 
 def cache(key, factory):
