@@ -47,6 +47,7 @@ K_FINAL = 8         # max chunks for compare/list/follow-up questions (need brea
 K_SIMPLE = 5        # fewer chunks for simple single-fact lookups (keeps tokens lean)
 RERANK_POOL = 16    # over-fetch this many, then cross-encoder rerank down to K_FINAL
 SEC_PER_KEY = 2     # max chunks kept per § section in the over-fetch pool
+LEX_KEEP = 3        # top BM25 (exact-term) hits guaranteed past the rerank cut
 
 _reranker: CrossEncoder | None = None
 _reranker_lock = threading.Lock()
@@ -104,6 +105,18 @@ def rerank(queries, hits, k):
         h = dict(h)
         h["rerank"] = round(_rerank_cache_get((q, h["chunk_id"])), 3)
         out.append(h)
+    # Lexical guarantee: the cross-encoder blurs big definition sections (e.g. § 61.1
+    # "Cross-country time means …"), but BM25 nails the exact defined term. Force the
+    # top LEX_KEEP BM25 hits past the rerank cut so definitional answers stay grounded.
+    kept = {h["chunk_id"] for h in out}
+    lex = sorted(hits, key=lambda h: h.get("bm25", 0.0), reverse=True)[:LEX_KEEP]
+    for h in lex:
+        if h["chunk_id"] not in kept:
+            h = dict(h)
+            h["rerank"] = round(_rerank_cache_get((q, h["chunk_id"])), 3)
+            h["lex_boost"] = True
+            out.append(h)
+            kept.add(h["chunk_id"])
     return out
 
 # Load the index once at startup. Fails fast if no index — run `python indexer.py` first.
@@ -264,7 +277,7 @@ def retrieve(queries, k: int = K_FINAL) -> list[dict]:
     cached = _RETRIEVE_CACHE.get(ckey)
     if cached is not None:
         _RETRIEVE_CACHE.move_to_end(ckey)
-        selected, scores = cached
+        selected, scores, bm25s = cached
     else:
         qvs = np.asarray([_embed_one(q) for q in queries], dtype="float32")  # (Q, 384)
         best = (_EMB @ qvs.T).max(axis=1)                     # best cosine to any query
@@ -292,13 +305,14 @@ def retrieve(queries, k: int = K_FINAL) -> list[dict]:
             if len(selected) >= k:
                 break
         scores = [round(float(best[i]), 4) for i in selected]
-        _RETRIEVE_CACHE[ckey] = (selected, scores)
+        bm25s = [round(float(bm25[i]), 4) for i in selected]
+        _RETRIEVE_CACHE[ckey] = (selected, scores, bm25s)
         _RETRIEVE_CACHE.move_to_end(ckey)
         if len(_RETRIEVE_CACHE) > _RETRIEVE_CAP:
             _RETRIEVE_CACHE.popitem(last=False)
 
     hits = []
-    for i, sc in zip(selected, scores):
+    for i, sc, bm in zip(selected, scores, bm25s):
         r = INDEX[i]
         hits.append({
             "chunk_id": r["chunk_id"],
@@ -308,6 +322,7 @@ def retrieve(queries, k: int = K_FINAL) -> list[dict]:
             "title": r.get("title"),
             "text": r["text"],
             "score": sc,
+            "bm25": bm,
         })
     return hits
 
